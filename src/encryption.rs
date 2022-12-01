@@ -1,30 +1,39 @@
 use crate::state::CEKData;
-use anchor_client::solana_sdk::pubkey::Pubkey;
 use anchor_lang::__private::base64;
 use chacha20poly1305::aead::{Aead, NewAead, Payload};
 use chacha20poly1305::{Key, XChaCha20Poly1305, XNonce};
-use sha2::{Digest, Sha256};
+use sha2::{Digest, Sha256, Sha512};
 use std::error::Error;
 use x25519_dalek::{PublicKey, StaticSecret};
+use zeroize::Zeroize;
 
 const XC20P_NONCE_LENGTH: usize = 24;
 const XC20P_TAG_LENGTH: usize = 16;
 
+const ED25519_SECRET_KEY_LEN: usize = 32;
+const X25519_SECRET_KEY_LEN: usize = 32;
+
 const ECDH_ES_XC20PKW_ALG: &str = "ECDH-ES+XC20PKW";
 const ECDH_ES_XC20PKW_KEYLEN: usize = 256;
 
-pub type SecretKey = [u8; 32];
+pub fn encrypt_cek(cek: &[u8], pubkey: &[u8; 32]) -> Result<CEKData, Box<dyn Error>> {
+    todo!()
+}
+
+pub fn encrypt_message<T: AsRef<[u8]>>(msg: T, cek: &[u8]) {
+    todo!()
+}
 
 /// Decrypt an encrypted CEK for the with the key that was used to encrypt it
-pub fn decrypt_cek(cek: CEKData, private_key: &SecretKey) -> Result<Vec<u8>, Box<dyn Error>> {
+pub fn decrypt_cek(cek: CEKData, private_key: &[u8]) -> Result<Vec<u8>, Box<dyn Error>> {
     let bytes = base64::decode(cek.header)?;
     let encrypted_key = base64::decode(cek.encrypted_key)?;
     let nonce = &bytes[0..XC20P_NONCE_LENGTH];
     let tag = &bytes[XC20P_NONCE_LENGTH..XC20P_NONCE_LENGTH + XC20P_TAG_LENGTH];
-    let epk_pub = Pubkey::new(&bytes[XC20P_NONCE_LENGTH + XC20P_TAG_LENGTH..]);
+    let epk_pub = &bytes[XC20P_NONCE_LENGTH + XC20P_TAG_LENGTH..];
 
-    let curve25519key = ed25519_to_x25519_secret(private_key);
-    let shared_secret = shared_key(&curve25519key, &epk_pub);
+    let curve25519key = ed25519_to_x25519_secret(private_key)?;
+    let shared_secret = shared_key(&curve25519key, epk_pub.try_into()?);
 
     // Key Encryption Key
     let kek = concat_kdf(
@@ -42,6 +51,7 @@ pub fn decrypt_cek(cek: CEKData, private_key: &SecretKey) -> Result<Vec<u8>, Box
     };
 
     let nonce = XNonce::from_slice(nonce);
+
     let res = cipher
         .decrypt(nonce, payload)
         .expect("CEK decryption failure");
@@ -71,20 +81,30 @@ pub fn decrypt_message<T: AsRef<[u8]>>(message: T, cek: &[u8]) -> Result<Vec<u8>
     Ok(res)
 }
 
-/// Convert ed25519 to x25519
-fn ed25519_to_x25519_secret(key: &SecretKey) -> [u8; 32] {
-    let pk = curve25519_dalek::edwards::CompressedEdwardsY(*key);
-    let pk = pk
-        .decompress()
-        .expect("Failed to convert key")
-        .to_montgomery();
-    pk.as_bytes().to_owned()
+pub fn ed25519_to_x25519_secret<T>(
+    secret: &T,
+) -> Result<[u8; X25519_SECRET_KEY_LEN], Box<dyn Error>>
+where
+    T: AsRef<[u8]> + ?Sized,
+{
+    let mut ed25519: [u8; ED25519_SECRET_KEY_LEN] = secret.as_ref().try_into()?;
+    let mut x25519: [u8; X25519_SECRET_KEY_LEN] = [0; X25519_SECRET_KEY_LEN];
+    let hash = Sha512::digest(ed25519);
+
+    x25519.copy_from_slice(&hash[..X25519_SECRET_KEY_LEN]);
+    x25519[0] &= 248;
+    x25519[31] &= 127;
+    x25519[31] |= 64;
+
+    ed25519.zeroize();
+
+    Ok(x25519)
 }
 
 /// Returns a shared key between our secret key and a peer's public key.
-fn shared_key(secret: &SecretKey, public: &Pubkey) -> [u8; 32] {
+fn shared_key(secret: &[u8; 32], public: &[u8; 32]) -> [u8; 32] {
     let pk = StaticSecret::from(*secret);
-    let sh = pk.diffie_hellman(&PublicKey::from(public.to_bytes()));
+    let sh = pk.diffie_hellman(&PublicKey::from(*public));
     sh.as_bytes().to_owned()
 }
 
@@ -123,7 +143,7 @@ fn concat_kdf(
         digest.update(apv);
 
         // Shared Key Length
-        digest.update(((len * 8) as u32).to_be_bytes());
+        digest.update((len as u32 * rounds).to_be_bytes());
 
         output.extend_from_slice(&digest.finalize_reset());
     }
@@ -141,29 +161,38 @@ mod tests {
     #[test]
     fn test_decrypt_cek() {
         let cek = CEKData {
-            header: "pPl/keSte54NxRKdVH3zzok7kTQZ7hK167m8KWlwjyFY4BmCnqMujEYkPgxz5JVLYmk28XXg9rqsp6SGyYyueFvqtOn2EDxJ".to_string(),
-            encrypted_key: "Hmaw0OER0udmva1WdofmM6BO1ikquhghkPeG4+297S0=".to_string(),
+            header: "vs3gIr710ivLea1va2vAfNmhUfLE+D2bMzA3KnlZlMeXlmc0T5Tbb9Br3XG4lpkpA7wnNcPiSEmh7X2/bmUa1MVBAkntxnUp".to_string(),
+            encrypted_key: "lIRaL0hk8yb3J+ASEkKmZqW+x8Y2zo/3K06dN255jaA=".to_string(),
         };
 
         let kp = Keypair::from_base58_string(
-            "4MmWSnmarhM148vGcvoG5cTBA42sMvnM6PCZYkquJA4xBx8JkV9KdfDcDRfycRm5Qwz4Xe5m28hDgEmwTkNacrqQ",
+            "2gnHrTqnjf86eDaF2Po8Au7VYLtfbHCB4hFrUsJqeK7HVCjDwU8CVmaQZVegJkHhkK1Kf8PGet21JjxV2sAGmLrN",
         );
 
-        println!("Device key: {:?}", kp.pubkey().to_string());
+        // println!("Secret key: {:?}", kp.to_bytes());
+        // println!("Device key: {:?}", kp.pubkey().to_string());
 
         let res = decrypt_cek(cek, kp.secret().as_bytes()).expect("Cannot decrypt");
 
-        println!("Device key: {:?}", res);
+        assert_eq!(
+            res,
+            [
+                159, 163, 245, 237, 4, 56, 130, 57, 52, 134, 158, 3, 198, 242, 7, 239, 60, 14, 74,
+                29, 65, 21, 109, 66, 139, 187, 226, 89, 32, 167, 36, 154
+            ]
+        );
     }
 
     #[test]
     fn test_decrypt_message() {
         let expected = "abc";
-        let encrypted = "C2TSXg/RL2KqIHWF0BD5ZSv0DOHGIAOLhj/3pRztkVZj91O47cw5UfSJfg==";
-        let cek = &[]; // TODO: CEK
-        let res = decrypt_message(encrypted, cek).expect("Cannot decrypt");
+        let encrypted = "aFdMrRbgPz6brrc46CeD9ipK1meHn0S5A3I42aiY2bwQ8jaoZqV+qGSIKw==";
+        let cek = [
+            159, 163, 245, 237, 4, 56, 130, 57, 52, 134, 158, 3, 198, 242, 7, 239, 60, 14, 74, 29,
+            65, 21, 109, 66, 139, 187, 226, 89, 32, 167, 36, 154,
+        ];
+        let res = decrypt_message(encrypted, &cek).expect("Cannot decrypt");
         let actual = String::from_utf8(res).unwrap();
-
         assert_eq!(actual, expected);
     }
 }
