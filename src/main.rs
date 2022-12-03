@@ -3,52 +3,37 @@
 mod constants;
 mod encryption;
 mod state;
+mod utils;
 
+use crate::encryption::{decrypt_cek, decrypt_message};
 use anchor_client::solana_client::nonblocking::pubsub_client::PubsubClient;
+use anchor_client::solana_client::nonblocking::rpc_client::RpcClient;
 use anchor_client::solana_client::rpc_config::{
     RpcTransactionLogsConfig, RpcTransactionLogsFilter,
 };
 use anchor_client::solana_client::rpc_response::{Response, RpcLogsResponse};
 use anchor_client::solana_sdk::commitment_config::CommitmentConfig;
 use anchor_client::solana_sdk::pubkey::Pubkey;
-use anchor_client::solana_sdk::signature::{read_keypair_file, Keypair};
+use anchor_client::solana_sdk::signature::{read_keypair_file, Keypair, Signer};
 use anchor_client::{ClientError, Cluster};
 use anchor_lang::AnchorDeserialize;
+use anyhow::{Error, Result};
 use clap::Parser;
 use constants::*;
 use futures::prelude::*;
 use regex::Regex;
 use state::*;
-use std::error::Error;
+use std::ffi::OsStr;
 use std::fmt::Debug;
 use std::path::PathBuf;
 use std::str::FromStr;
-use tracing::info;
+use tracing::{debug, info};
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
 use tracing_subscriber::{EnvFilter, Registry};
 use tracing_tree::HierarchicalLayer;
 
-#[tokio::main(flavor = "current_thread")]
-async fn main() -> Result<(), Box<dyn Error>> {
-    Registry::default()
-        .with(EnvFilter::from_default_env())
-        .with(
-            HierarchicalLayer::new(2)
-                .with_targets(true)
-                .with_bracketed_fields(true),
-        )
-        // .with(
-        //     tracing_subscriber::fmt::layer()
-        //         .json()
-        //         .with_writer(|| File::create("/var/log/agent-log.json").unwrap()),
-        // )
-        .init();
-
-    Agent::init()?.run().await
-}
-
-#[derive(Parser)]
+#[derive(Parser, Debug)]
 #[command(name = "SVT Agent")]
 #[command(version = "1.0")]
 #[command(about = "SVT Agent", long_about = None)]
@@ -63,7 +48,27 @@ struct Cli {
     messenger_program_id: String,
 }
 
-#[derive(Debug)]
+#[tokio::main(flavor = "current_thread")]
+async fn main() -> Result<()> {
+    Registry::default()
+        .with(EnvFilter::from_default_env())
+        .with(
+            HierarchicalLayer::new(2)
+                .with_targets(true)
+                .with_bracketed_fields(true),
+        )
+        // .with(
+        //     tracing_subscriber::fmt::layer()
+        //         .json()
+        //         .with_writer(|| File::create("/var/log/agent-log.json").unwrap()),
+        // )
+        .init();
+
+    Agent::new(Cli::parse())?.run().await?;
+
+    Ok(())
+}
+
 struct Agent {
     /// Keypair is used for decrypting messages from the channel
     keypair: Keypair,
@@ -73,43 +78,34 @@ struct Agent {
     channel_id: Pubkey,
     /// Solana cluster
     cluster: Cluster,
+    rpc: RpcClient,
 }
 
 impl Agent {
     #[tracing::instrument]
-    fn init() -> Result<Self, Box<dyn Error>> {
-        let cli = Cli::parse();
-        let keypair = read_keypair_file(cli.keypair)?;
+    fn new(cli: Cli) -> Result<Self> {
+        let keypair = read_keypair_file(cli.keypair).expect("Keypair required");
         let program_id = Pubkey::from_str(&cli.messenger_program_id)?;
         let channel_id = Pubkey::from_str(&cli.channel_id)?;
+
+        let rpc = RpcClient::new_with_commitment(
+            cli.cluster.url().to_string(),
+            CommitmentConfig::confirmed(),
+        );
+
         Ok(Self {
             program_id,
             channel_id,
             keypair,
             cluster: cli.cluster,
+            rpc,
         })
     }
 
-    fn parse_cek(&self) -> Result<(), Box<dyn Error>> {
-        Ok(())
-    }
-
-    fn load_channel(&self) -> Result<(), Box<dyn Error>> {
-        Ok(())
-    }
-
-    fn load_membership(&self) -> Result<(), Box<dyn Error>> {
-        Ok(())
-    }
-
-    #[tracing::instrument]
-    async fn run(&self) -> Result<(), Box<dyn Error>> {
+    #[tracing::instrument(skip(self))]
+    async fn run(&self) -> Result<()> {
         info!("Program ID {:?}", self.program_id);
         info!("Channel ID {:?}", self.channel_id);
-
-        // TODO:
-        //  - Get latest commands from blockchain
-        //  - Run or skip each command
 
         // TODO: Invalid Request: Only 1 address supported (-32602)
         let addresses = vec![self.channel_id.to_string()];
@@ -117,10 +113,7 @@ impl Agent {
         loop {
             info!("Trying to connect `{}`...", self.cluster.ws_url());
             let pubsub_client = PubsubClient::new(self.cluster.ws_url()).await?;
-
-            self.listen_events(&pubsub_client, &addresses).await?;
-
-            info!("Disconnecting...");
+            self.listen_commands(&pubsub_client, &addresses).await?;
             match pubsub_client.shutdown().await {
                 Ok(_) => {
                     info!("Successfully disconnected.");
@@ -129,19 +122,43 @@ impl Agent {
                     info!("Failed to disconnect: {}", e);
                 }
             }
-
-            info!("Waiting 5 sec...");
-            tokio::time::sleep(std::time::Duration::from_millis(5000)).await;
+            info!("Waiting 3 sec...");
+            tokio::time::sleep(std::time::Duration::from_millis(3000)).await;
         }
     }
 
-    #[tracing::instrument(skip(client))]
-    async fn listen_events(
-        &self,
-        client: &PubsubClient,
-        addresses: &[String],
-    ) -> Result<(), Box<dyn Error>> {
-        info!("Listening events...");
+    #[tracing::instrument(skip(self))]
+    async fn load_commands(&self) -> Result<Vec<String>> {
+        info!("Loading device...");
+        let device = self.load_device().await?;
+
+        info!("Decrypting CEK...");
+        let cek = decrypt_cek(device.cek, self.keypair.secret().as_bytes())?;
+
+        info!("Loading membership...");
+        let membership = self.load_membership().await?;
+
+        info!("Loading channel...");
+        let channel = self.load_channel().await?;
+
+        info!("Prepare messages...");
+        let mut commands = vec![];
+        for message in channel.messages {
+            if message.id > membership.last_read_message_id {
+                commands.push(String::from_utf8(decrypt_message(
+                    message.content,
+                    cek.as_slice(),
+                )?)?);
+            }
+        }
+
+        info!("Found {} commands...", commands.len());
+
+        Ok(commands)
+    }
+
+    #[tracing::instrument(skip(self, client))]
+    async fn listen_commands(&self, client: &PubsubClient, addresses: &[String]) -> Result<()> {
         let (mut stream, unsubscribe) = client
             .logs_subscribe(
                 RpcTransactionLogsFilter::Mentions(addresses.to_vec()),
@@ -152,9 +169,11 @@ impl Agent {
             .await?;
 
         while let Some(log) = stream.next().await {
-            self.handle_event::<NewMessageEvent>(log)
-                .await
-                .expect("Failed to handle event");
+            self.handle_event::<NewMessageEvent>(log, |e| {
+                info!("New Event {:?}", e);
+            })
+            .await
+            .expect("Failed to handle `NewMessageEvent`");
         }
 
         info!("Unsubscribing...");
@@ -163,19 +182,14 @@ impl Agent {
         Ok(())
     }
 
-    #[tracing::instrument()]
-    async fn handle_event<T>(&self, log: Response<RpcLogsResponse>) -> Result<(), Box<dyn Error>>
+    async fn handle_event<T>(
+        &self,
+        log: Response<RpcLogsResponse>,
+        cb: fn(e: T) -> (),
+    ) -> Result<()>
     where
         T: anchor_lang::Event + anchor_lang::AnchorDeserialize + Debug,
     {
-        info!(
-            "  Status: {}",
-            log.value
-                .err
-                .map(|err| err.to_string())
-                .unwrap_or_else(|| "Success".into())
-        );
-
         let mut logs = &log.value.logs[..];
         let self_program_str = std::str::from_utf8(self.program_id.as_ref())?;
 
@@ -198,8 +212,7 @@ impl Agent {
                     };
                     // Emit the event.
                     if let Some(e) = event {
-                        info!("New Event!");
-                        info!("{:?}", e);
+                        cb(e);
                     }
                     // Switch program context on CPI.
                     if let Some(new_program) = new_program {
@@ -215,18 +228,95 @@ impl Agent {
 
         Ok(())
     }
+
+    fn get_membership_pda(&self, channel: &Pubkey, authority: &Pubkey) -> (Pubkey, u8) {
+        Pubkey::find_program_address(
+            &[&channel.to_bytes(), &authority.to_bytes()],
+            &self.program_id,
+        )
+    }
+
+    fn get_device_pda(&self, membership: &Pubkey, key: &Pubkey) -> (Pubkey, u8) {
+        Pubkey::find_program_address(&[&membership.to_bytes(), &key.to_bytes()], &self.program_id)
+    }
+
+    async fn load_membership(&self) -> Result<ChannelMembership> {
+        let pda = self.get_membership_pda(&self.channel_id, &self.keypair.pubkey());
+        self.load_account(&pda.0).await
+    }
+
+    async fn load_device(&self) -> Result<ChannelDevice> {
+        let membership_pda = self.get_membership_pda(&self.channel_id, &self.keypair.pubkey());
+        let pda = self.get_device_pda(&membership_pda.0, &self.keypair.pubkey());
+        self.load_account(&pda.0).await
+    }
+
+    async fn load_channel(&self) -> Result<Channel> {
+        self.load_account(&self.channel_id).await
+    }
+
+    async fn load_account<T: AnchorDeserialize>(&self, addr: &Pubkey) -> Result<T> {
+        let data = self.rpc.get_account_data(addr).await?;
+        // skip anchor discriminator
+        let account = T::deserialize(&mut &data.as_slice()[8..])?;
+        Ok(account)
+    }
+}
+
+struct CommandRunnerCommand {
+    id: u64,
+    uuid: String,
+    name: String,
+    args: Vec<String>,
 }
 
 struct CommandRunner {
-    keypair: Keypair,
+    cek: Vec<u8>,
+    queue: Vec<CommandRunnerCommand>,
 }
 
 impl CommandRunner {
-    pub fn parse(&self, msg: &str) {
-        // TODO: parse and decrypt message
+    pub fn new(cek: Vec<u8>) -> Self {
+        Self {
+            cek,
+            queue: Vec::new(),
+        }
     }
 
-    pub fn run_ansible_task() -> Result<(), Box<dyn Error>> {
+    pub fn push_message(&mut self, msg: Message) -> Result<()> {
+        let cmd = String::from_utf8(decrypt_message(msg.content, self.cek.as_slice())?)?;
+
+        let parts = cmd.split(COMMAND_DELIMITER).collect::<Vec<_>>();
+
+        if parts.len() < 3 {
+            return Err(Error::msg("Invalid command"));
+        }
+
+        let name = String::from(parts[0]);
+        let args = parts[1]
+            .split(',')
+            .map(|s| s.to_string())
+            .collect::<Vec<_>>();
+        let uuid = String::from(parts[2]);
+
+        self.queue.push(CommandRunnerCommand {
+            id: msg.id,
+            name,
+            args,
+            uuid,
+        });
+
+        Ok(())
+    }
+
+    pub fn run(&mut self) {
+        if let Some(cmd) = self.queue.pop() {
+            self.run_ansible_task();
+            self.run_log_monitor();
+        }
+    }
+
+    pub fn run_ansible_task(&self) -> Result<()> {
         let a = tokio::process::Command::new("docker")
             .arg("run")
             .arg("-a")
@@ -236,8 +326,8 @@ impl CommandRunner {
         Ok(())
     }
 
-    pub fn run_log_watcher() -> Result<(), Box<dyn Error>> {
-        // TODO: run watcher
+    pub fn run_log_monitor(&self) -> Result<()> {
+        // TODO: run monitor
         Ok(())
     }
 }
@@ -339,4 +429,51 @@ impl Execution {
 }
 
 #[test]
-fn test() {}
+fn test_channel() {
+    let mut data: &[u8] = &[
+        0, 0, 0, 0, 5, 0, 0, 0, 116, 101, 115, 116, 50, 212, 187, 201, 36, 193, 154, 106, 252, 42,
+        57, 224, 82, 49, 66, 121, 115, 239, 73, 20, 146, 111, 168, 32, 147, 213, 73, 8, 203, 3,
+        111, 154, 39, 45, 27, 137, 99, 0, 0, 0, 0, 129, 30, 137, 99, 0, 0, 0, 0, 0, 1, 0, 1, 0, 0,
+        0, 0, 0, 0, 0, 1, 0, 1, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 212, 187, 201, 36, 193, 154, 106,
+        252, 42, 57, 224, 82, 49, 66, 121, 115, 239, 73, 20, 146, 111, 168, 32, 147, 213, 73, 8,
+        203, 3, 111, 154, 39, 129, 30, 137, 99, 0, 0, 0, 0, 1, 60, 0, 0, 0, 48, 54, 114, 84, 69,
+        79, 99, 102, 121, 48, 72, 86, 99, 83, 71, 119, 47, 105, 73, 86, 116, 75, 47, 88, 67, 69,
+        49, 71, 115, 87, 118, 107, 56, 103, 98, 87, 78, 99, 84, 88, 109, 117, 113, 119, 50, 109,
+        67, 55, 74, 55, 68, 103, 101, 100, 55, 107, 107, 119, 61, 61, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    ];
+
+    let ch = Channel::deserialize(&mut data).unwrap();
+
+    println!("{:?}", ch);
+}
+
+#[tokio::test]
+async fn test() {
+    let keypair = PathBuf::from("./keypair.json");
+
+    let agent = Agent::new(Cli {
+        keypair,
+        cluster: Cluster::Devnet,
+        channel_id: DEFAULT_CHANNEL_ID.to_string(),
+        messenger_program_id: MESSENGER_PROGRAM_ID.to_string(),
+    })
+    .unwrap();
+
+    // let channel = agent.load_channel().await.unwrap();
+    let commands = agent.load_commands().await.unwrap();
+
+    println!("{:?}", commands);
+}

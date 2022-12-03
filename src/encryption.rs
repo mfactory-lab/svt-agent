@@ -1,22 +1,24 @@
 use crate::state::CEKData;
 use anchor_lang::__private::base64;
+use anyhow::Result;
 use chacha20poly1305::aead::{Aead, NewAead, Payload};
 use chacha20poly1305::{Key, XChaCha20Poly1305, XNonce};
 use sha2::{Digest, Sha256, Sha512};
-use std::error::Error;
 use x25519_dalek::{PublicKey, StaticSecret};
 use zeroize::Zeroize;
 
 const XC20P_NONCE_LENGTH: usize = 24;
 const XC20P_TAG_LENGTH: usize = 16;
 
+const ED25519_PUBLIC_KEY_LEN: usize = 32;
 const ED25519_SECRET_KEY_LEN: usize = 32;
+const X25519_PUBLIC_KEY_LEN: usize = 32;
 const X25519_SECRET_KEY_LEN: usize = 32;
 
 const ECDH_ES_XC20PKW_ALG: &str = "ECDH-ES+XC20PKW";
 const ECDH_ES_XC20PKW_KEYLEN: usize = 256;
 
-pub fn encrypt_cek(cek: &[u8], pubkey: &[u8; 32]) -> Result<CEKData, Box<dyn Error>> {
+pub fn encrypt_cek(cek: &[u8], pubkey: &[u8; 32]) -> Result<CEKData> {
     todo!()
 }
 
@@ -25,7 +27,7 @@ pub fn encrypt_message<T: AsRef<[u8]>>(msg: T, cek: &[u8]) {
 }
 
 /// Decrypt an encrypted CEK for the with the key that was used to encrypt it
-pub fn decrypt_cek(cek: CEKData, private_key: &[u8]) -> Result<Vec<u8>, Box<dyn Error>> {
+pub fn decrypt_cek(cek: CEKData, private_key: &[u8]) -> Result<Vec<u8>> {
     let bytes = base64::decode(cek.header)?;
     let encrypted_key = base64::decode(cek.encrypted_key)?;
     let nonce = &bytes[0..XC20P_NONCE_LENGTH];
@@ -60,7 +62,7 @@ pub fn decrypt_cek(cek: CEKData, private_key: &[u8]) -> Result<Vec<u8>, Box<dyn 
 }
 
 /// Decrypt a message with the CEK used to encrypt it
-pub fn decrypt_message<T: AsRef<[u8]>>(message: T, cek: &[u8]) -> Result<Vec<u8>, Box<dyn Error>> {
+pub fn decrypt_message<T: AsRef<[u8]>>(message: T, cek: &[u8]) -> Result<Vec<u8>> {
     let bytes = base64::decode(message)?;
     let nonce = &bytes[0..XC20P_NONCE_LENGTH];
     let tag = &bytes[bytes.len() - XC20P_TAG_LENGTH..];
@@ -81,9 +83,24 @@ pub fn decrypt_message<T: AsRef<[u8]>>(message: T, cek: &[u8]) -> Result<Vec<u8>
     Ok(res)
 }
 
-pub fn ed25519_to_x25519_secret<T>(
-    secret: &T,
-) -> Result<[u8; X25519_SECRET_KEY_LEN], Box<dyn Error>>
+// pub fn ed25519_to_x25519_public<T>(
+//     public: &T,
+// ) -> Result<[u8; X25519_PUBLIC_KEY_LEN], Box<dyn Error>>
+// where
+//     T: AsRef<[u8]> + ?Sized,
+// {
+//     let mut ed25519: [u8; ED25519_PUBLIC_KEY_LEN] = public.as_ref().try_into()?;
+//
+//     let x25519: [u8; X25519_PUBLIC_KEY_LEN] = CompressedEdwardsY(ed25519)
+//         .decompress()
+//         .map(|edwards| edwards.to_montgomery().0)?;
+//
+//     ed25519.zeroize();
+//
+//     Ok(x25519)
+// }
+
+pub fn ed25519_to_x25519_secret<T>(secret: &T) -> Result<[u8; X25519_SECRET_KEY_LEN]>
 where
     T: AsRef<[u8]> + ?Sized,
 {
@@ -109,13 +126,7 @@ fn shared_key(secret: &[u8; 32], public: &[u8; 32]) -> [u8; 32] {
 }
 
 /// The Concat KDF (using SHA-256) as defined in Section 5.8.1 of NIST.800-56A
-fn concat_kdf(
-    alg: &str,
-    len: usize,
-    z: &[u8],
-    apu: &[u8],
-    apv: &[u8],
-) -> Result<Vec<u8>, Box<dyn Error>> {
+fn concat_kdf(alg: &str, len: usize, z: &[u8], apu: &[u8], apv: &[u8]) -> Result<Vec<u8>> {
     let mut digest: Sha256 = Sha256::new();
     let mut output: Vec<u8> = Vec::new();
 

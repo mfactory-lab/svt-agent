@@ -1,3 +1,4 @@
+use anchor_lang::prelude::borsh::{BorshDeserialize, BorshSerialize};
 use anchor_lang::prelude::*;
 
 #[derive(AnchorSerialize, AnchorDeserialize, Debug)]
@@ -74,18 +75,23 @@ pub struct CEKData {
     pub encrypted_key: String,
 }
 
+#[derive(AnchorSerialize, AnchorDeserialize, Debug)]
+pub struct Message {
+    /// Uniq message id
+    pub id: u64,
+    /// The message sender id
+    pub sender: Pubkey,
+    /// The unix timestamp at which the message was received
+    pub created_at: i64,
+    /// Message flags
+    pub flags: u8,
+    /// The (typically encrypted) message content
+    pub content: String,
+}
+
 #[event]
 #[derive(Debug)]
 pub struct NewMessageEvent {
     pub channel: Pubkey,
     pub message: Message,
-}
-
-#[derive(AnchorSerialize, AnchorDeserialize, Debug)]
-pub struct Message {
-    pub id: u32,
-    pub sender: Pubkey,
-    pub created_at: i64,
-    pub flags: u8,
-    pub content: String,
 }
