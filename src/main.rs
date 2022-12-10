@@ -8,7 +8,9 @@ mod runner;
 mod state;
 mod utils;
 
-use crate::encryption::{decrypt_cek, decrypt_message};
+use crate::encryption::decrypt_cek;
+use crate::listener::Listener;
+use crate::runner::{Task, TaskRunner};
 use anchor_client::solana_client::nonblocking::pubsub_client::PubsubClient;
 use anchor_client::solana_client::nonblocking::rpc_client::RpcClient;
 use anchor_client::solana_sdk::commitment_config::CommitmentConfig;
@@ -103,14 +105,39 @@ impl Agent {
         info!("Program ID {:?}", self.program_id);
         info!("Channel ID {:?}", self.channel_id);
 
-        // TODO: Invalid Request: Only 1 address supported (-32602)
-        let addresses = vec![self.channel_id.to_string()];
+        let mut runner = TaskRunner::new();
 
-        // handle realtime events
+        let cek = self.load_cek().await?;
+        let commands = self.load_commands(cek.as_slice()).await?;
+
+        info!("Added {} commands to the runner...", commands.len());
+
+        for command in commands {
+            runner.add_task(command);
+        }
+
+        // tokio::spawn({
+        //     async move {
+        //         self.listen_commands();
+        //     }
+        // });
+
+        runner.start().await;
+
+        Ok(())
+    }
+
+    #[tracing::instrument(skip(self))]
+    async fn listen_commands(&self) -> Result<()> {
+        let listener = Listener::new(&self.program_id);
+        // Invalid Request: Only 1 address supported (-32602)
+        let mentions = vec![self.channel_id.to_string()];
+        let url = self.cluster.ws_url();
         loop {
-            info!("Trying to connect `{}`...", self.cluster.ws_url());
-            let pubsub_client = PubsubClient::new(self.cluster.ws_url()).await?;
-            self.listen_commands(&pubsub_client, &addresses).await?;
+            info!("Trying to connect `{}`...", url);
+            let pubsub_client = PubsubClient::new(url).await?;
+            listener.listen_commands(&pubsub_client, &mentions).await?;
+            // listener.
             match pubsub_client.shutdown().await {
                 Ok(_) => {}
                 Err(e) => {
@@ -123,44 +150,30 @@ impl Agent {
     }
 
     #[tracing::instrument(skip(self))]
-    async fn load_commands(&self) -> Result<Vec<String>> {
+    async fn load_cek(&self) -> Result<Vec<u8>> {
         info!("Loading device...");
         let device = self.load_device().await?;
-
         info!("Decrypting CEK...");
-        let cek = decrypt_cek(device.cek, self.keypair.secret().as_bytes())?;
+        decrypt_cek(device.cek, self.keypair.secret().as_bytes())
+    }
 
+    #[tracing::instrument(skip(self))]
+    async fn load_commands(&self, cek: &[u8]) -> Result<Vec<Task>> {
         info!("Loading membership...");
         let membership = self.load_membership().await?;
 
         info!("Loading channel...");
         let channel = self.load_channel().await?;
 
-        info!("Prepare messages...");
+        info!("Prepare commands...");
         let mut commands = vec![];
         for message in channel.messages {
             if message.id > membership.last_read_message_id {
-                commands.push(String::from_utf8(decrypt_message(
-                    message.content,
-                    cek.as_slice(),
-                )?)?);
+                commands.push(message.convert_to_task(cek)?);
             }
         }
 
-        info!("Found {} commands...", commands.len());
-
         Ok(commands)
-    }
-
-    fn get_membership_pda(&self, channel: &Pubkey, authority: &Pubkey) -> (Pubkey, u8) {
-        Pubkey::find_program_address(
-            &[&channel.to_bytes(), &authority.to_bytes()],
-            &self.program_id,
-        )
-    }
-
-    fn get_device_pda(&self, membership: &Pubkey, key: &Pubkey) -> (Pubkey, u8) {
-        Pubkey::find_program_address(&[&membership.to_bytes(), &key.to_bytes()], &self.program_id)
     }
 
     async fn load_membership(&self) -> Result<ChannelMembership> {
@@ -183,6 +196,17 @@ impl Agent {
         // skip anchor discriminator
         let account = T::deserialize(&mut &data.as_slice()[8..])?;
         Ok(account)
+    }
+
+    fn get_membership_pda(&self, channel: &Pubkey, authority: &Pubkey) -> (Pubkey, u8) {
+        Pubkey::find_program_address(
+            &[&channel.to_bytes(), &authority.to_bytes()],
+            &self.program_id,
+        )
+    }
+
+    fn get_device_pda(&self, membership: &Pubkey, key: &Pubkey) -> (Pubkey, u8) {
+        Pubkey::find_program_address(&[&membership.to_bytes(), &key.to_bytes()], &self.program_id)
     }
 }
 
@@ -231,7 +255,6 @@ async fn test() {
     .unwrap();
 
     // let channel = agent.load_channel().await.unwrap();
-    let commands = agent.load_commands().await.unwrap();
-
-    println!("{:?}", commands);
+    // let commands = agent.load_commands().await.unwrap();
+    // println!("{:?}", commands);
 }

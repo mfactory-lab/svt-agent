@@ -7,8 +7,8 @@ pub struct Notifier<'a> {
     task: &'a Task,
 }
 
-impl<'a> Notifier<'_> {
-    pub fn new(task: &Task) -> Self {
+impl<'a> Notifier<'a> {
+    pub fn new(task: &'a Task) -> Self {
         Self { task }
     }
 
@@ -20,19 +20,18 @@ impl<'a> Notifier<'_> {
         self.notify("start");
     }
 
-    pub fn notify_finish(&self, status: ExitStatus) {
+    pub fn notify_finish(&self, status: &ExitStatus) {
         info!("[Notifier] Finish: {}", status);
         self.notify("finish");
     }
 
-    pub fn notify_error(&self, error: Error) {
+    pub fn notify_error(&self, error: &Error) {
         info!("[Notifier] Error: {}", error);
         self.notify("error");
     }
 
     pub fn notify(&self, event: &str) {
-        todo!()
-        // send influx state
-        // send webhook
+        // TODO: send influx state
+        // TODO: send webhook
     }
 }

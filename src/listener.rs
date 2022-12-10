@@ -19,11 +19,17 @@ pub struct Listener {
 }
 
 impl Listener {
+    pub fn new(program_id: &Pubkey) -> Self {
+        Self {
+            program_id: *program_id,
+        }
+    }
+
     #[tracing::instrument(skip(self, client))]
-    async fn listen_commands(&self, client: &PubsubClient, addresses: &[String]) -> Result<()> {
+    pub async fn listen_commands(&self, client: &PubsubClient, mentions: &[String]) -> Result<()> {
         let (mut stream, unsubscribe) = client
             .logs_subscribe(
-                RpcTransactionLogsFilter::Mentions(addresses.to_vec()),
+                RpcTransactionLogsFilter::Mentions(mentions.to_vec()),
                 RpcTransactionLogsConfig {
                     commitment: Some(CommitmentConfig::processed()),
                 },
@@ -105,7 +111,7 @@ fn handle_program_log<T: anchor_lang::Event + anchor_lang::AnchorDeserialize>(
         .strip_prefix(PROGRAM_LOG)
         .or_else(|| l.strip_prefix(PROGRAM_DATA))
     {
-        let borsh_bytes = match anchor_lang::__private::base64::decode(&log) {
+        let borsh_bytes = match anchor_lang::__private::base64::decode(log) {
             Ok(borsh_bytes) => borsh_bytes,
             _ => {
                 #[cfg(feature = "debug")]
