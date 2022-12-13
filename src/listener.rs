@@ -1,4 +1,3 @@
-use crate::state::NewMessageEvent;
 use anchor_client::solana_client::nonblocking::pubsub_client::PubsubClient;
 use anchor_client::solana_client::rpc_config::{
     RpcTransactionLogsConfig, RpcTransactionLogsFilter,
@@ -8,59 +7,62 @@ use anchor_client::solana_sdk::commitment_config::CommitmentConfig;
 use anchor_client::solana_sdk::pubkey::Pubkey;
 use anchor_client::ClientError;
 use anchor_lang::AnchorDeserialize;
+use anchor_lang::Event;
 use anyhow::Result;
 use futures::StreamExt;
 use regex::Regex;
-use std::fmt::Debug;
 use tracing::info;
 
-pub struct Listener {
+pub struct Listener<'a> {
     program_id: Pubkey,
+    client: &'a PubsubClient,
+    filter: &'a RpcTransactionLogsFilter,
+    config: RpcTransactionLogsConfig,
 }
 
-impl Listener {
-    pub fn new(program_id: &Pubkey) -> Self {
+impl<'a> Listener<'a> {
+    pub fn new(
+        program_id: &Pubkey,
+        client: &'a PubsubClient,
+        filter: &'a RpcTransactionLogsFilter,
+    ) -> Self {
         Self {
             program_id: *program_id,
+            config: RpcTransactionLogsConfig {
+                commitment: Some(CommitmentConfig::processed()),
+            },
+            filter,
+            client,
         }
     }
 
-    #[tracing::instrument(skip(self, client))]
-    pub async fn listen_commands(&self, client: &PubsubClient, mentions: &[String]) -> Result<()> {
-        let (mut stream, unsubscribe) = client
-            .logs_subscribe(
-                RpcTransactionLogsFilter::Mentions(mentions.to_vec()),
-                RpcTransactionLogsConfig {
-                    commitment: Some(CommitmentConfig::processed()),
-                },
-            )
+    pub async fn on<T: Event>(&self, cb: impl Fn(T)) -> Result<()> {
+        let (mut stream, unsubscribe) = self
+            .client
+            .logs_subscribe(self.filter.clone(), self.config.clone())
             .await?;
 
         while let Some(log) = stream.next().await {
-            self.handle_event::<NewMessageEvent>(log, |e| {
-                // TODO: handle
-                info!("New Event {:?}", e);
-            })
-            .await
-            .expect("Failed to handle `NewMessageEvent`");
+            match self.handle_event::<T>(&log, &cb).await {
+                Ok(_) => {}
+                Err(e) => {
+                    info!("[Listener] Error: {}", e);
+                }
+            }
         }
 
-        info!("Unsubscribing...");
+        info!("[Listener] Unsubscribing...");
         FnOnce::call_once(unsubscribe, ());
 
         Ok(())
     }
 
-    async fn handle_event<T>(
-        &self,
-        log: Response<RpcLogsResponse>,
-        cb: fn(e: T) -> (),
-    ) -> Result<()>
+    async fn handle_event<T>(&self, log: &Response<RpcLogsResponse>, cb: &impl Fn(T)) -> Result<()>
     where
-        T: anchor_lang::Event + anchor_lang::AnchorDeserialize + Debug,
+        T: Event,
     {
         let mut logs = &log.value.logs[..];
-        let self_program_str = std::str::from_utf8(self.program_id.as_ref())?;
+        let self_program_str = self.program_id.to_string();
 
         if !logs.is_empty() {
             info!("Try to parse logs...");
@@ -70,12 +72,15 @@ impl Listener {
                     // Parse the log.
                     let (event, new_program, did_pop) = {
                         if self_program_str == execution.program() {
-                            handle_program_log::<T>(self_program_str, l).unwrap_or_else(|e| {
-                                info!("Unable to parse log: {}", e);
-                                (None, None, false)
-                            })
+                            handle_program_log::<T>(self_program_str.as_str(), l).unwrap_or_else(
+                                |e| {
+                                    info!("Unable to parse log: {}", e);
+                                    (None, None, false)
+                                },
+                            )
                         } else {
-                            let (program, did_pop) = handle_system_log(self_program_str, l);
+                            let (program, did_pop) =
+                                handle_system_log(self_program_str.as_str(), l);
                             (None, program, did_pop)
                         }
                     };
@@ -102,7 +107,7 @@ impl Listener {
 const PROGRAM_LOG: &str = "Program log: ";
 const PROGRAM_DATA: &str = "Program data: ";
 
-fn handle_program_log<T: anchor_lang::Event + anchor_lang::AnchorDeserialize>(
+fn handle_program_log<T: Event>(
     program_id: &str,
     l: &str,
 ) -> Result<(Option<T>, Option<String>, bool), ClientError> {

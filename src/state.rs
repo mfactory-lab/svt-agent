@@ -79,7 +79,7 @@ pub struct CEKData {
     pub encrypted_key: String,
 }
 
-#[derive(AnchorSerialize, AnchorDeserialize, Debug)]
+#[derive(AnchorSerialize, AnchorDeserialize, Debug, Clone)]
 pub struct Message {
     /// Uniq message id
     pub id: u64,
@@ -117,7 +117,7 @@ impl Message {
 }
 
 #[event]
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct NewMessageEvent {
     pub channel: Pubkey,
     pub message: Message,
