@@ -13,6 +13,7 @@ use crate::listener::Listener;
 use crate::runner::{Task, TaskRunner};
 use anchor_client::solana_client::nonblocking::pubsub_client::PubsubClient;
 use anchor_client::solana_client::nonblocking::rpc_client::RpcClient;
+use anchor_client::solana_client::rpc_config::RpcTransactionLogsFilter;
 use anchor_client::solana_sdk::commitment_config::CommitmentConfig;
 use anchor_client::solana_sdk::pubkey::Pubkey;
 use anchor_client::solana_sdk::signature::{read_keypair_file, Keypair, Signer};
@@ -25,7 +26,12 @@ use state::*;
 use std::fmt::Debug;
 use std::path::PathBuf;
 use std::str::FromStr;
-use tracing::info;
+use std::sync::Arc;
+use tokio::sync::mpsc::UnboundedSender;
+use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver};
+use tokio::sync::RwLock;
+use tokio::task::JoinHandle;
+use tracing::{error, info, warn};
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
 use tracing_subscriber::{EnvFilter, Registry};
@@ -38,7 +44,7 @@ use tracing_tree::HierarchicalLayer;
 struct Cli {
     #[arg(short, long, value_name = "KEYPAIR")]
     keypair: PathBuf,
-    #[arg(short, long, value_name = "CLUSTER", default_value = "d")]
+    #[arg(long, value_name = "CLUSTER", default_value = "d")]
     cluster: Cluster,
     #[arg(short, long, value_name = "CHANNEL", default_value = DEFAULT_CHANNEL_ID)]
     channel_id: String,
@@ -105,48 +111,130 @@ impl Agent {
         info!("Program ID {:?}", self.program_id);
         info!("Channel ID {:?}", self.channel_id);
 
-        let mut runner = TaskRunner::new();
-
         let cek = self.load_cek().await?;
-        let commands = self.load_commands(cek.as_slice()).await?;
+        let membership = self.load_membership().await?;
+        let commands = self
+            .load_commands(cek.as_slice(), membership.last_read_message_id)
+            .await?;
 
-        info!("Added {} commands to the runner...", commands.len());
+        info!("Added {} commands to the queue...", commands.len());
+
+        let runner = Arc::new(RwLock::new(TaskRunner::new()));
 
         for command in commands {
-            runner.add_task(command);
+            runner.write().await.add_task(command);
         }
 
-        // tokio::spawn({
-        //     async move {
-        //         self.listen_commands();
-        //     }
-        // });
+        let (sender, receiver) = unbounded_channel::<NewMessageEvent>();
 
-        runner.start().await;
+        let (_, _, _) = tokio::join!(
+            self.command_runner(&runner),
+            self.command_listener(sender),
+            self.command_processor(receiver, runner, cek),
+        );
 
         Ok(())
     }
 
-    #[tracing::instrument(skip(self))]
-    async fn listen_commands(&self) -> Result<()> {
-        let listener = Listener::new(&self.program_id);
-        // Invalid Request: Only 1 address supported (-32602)
-        let mentions = vec![self.channel_id.to_string()];
-        let url = self.cluster.ws_url();
-        loop {
-            info!("Trying to connect `{}`...", url);
-            let pubsub_client = PubsubClient::new(url).await?;
-            listener.listen_commands(&pubsub_client, &mentions).await?;
-            // listener.
-            match pubsub_client.shutdown().await {
-                Ok(_) => {}
-                Err(e) => {
-                    info!("Failed to disconnect: {}", e);
+    fn command_runner(&self, runner: &Arc<RwLock<TaskRunner>>) -> JoinHandle<()> {
+        tokio::spawn({
+            let runner = runner.clone();
+            async move {
+                loop {
+                    match runner.write().await.run().await {
+                        Ok(_) => {}
+                        Err(e) => {
+                            error!("Error: {}", e)
+                        }
+                    };
+                    info!("[command_runner] Waiting a command...");
+                    tokio::time::sleep(std::time::Duration::from_millis(5000)).await;
                 }
             }
-            info!("Reconnecting...");
-            tokio::time::sleep(std::time::Duration::from_millis(3000)).await;
+        })
+    }
+
+    fn command_processor(
+        &self,
+        mut receiver: UnboundedReceiver<NewMessageEvent>,
+        runner: Arc<RwLock<TaskRunner>>,
+        cek: Vec<u8>,
+    ) -> JoinHandle<()> {
+        tokio::spawn({
+            async move {
+                while let Some(msg) = receiver.recv().await {
+                    match msg.message.convert_to_task(cek.as_slice()) {
+                        Ok(task) => {
+                            runner.write().await.add_task(task);
+                        }
+                        Err(_) => {
+                            info!("[command_processor] Failed to convert message to task");
+                        }
+                    }
+                }
+            }
+        })
+    }
+
+    fn command_listener(&self, sender: UnboundedSender<NewMessageEvent>) -> JoinHandle<()> {
+        tokio::spawn({
+            let url = self.cluster.ws_url().to_owned();
+            let program_id = self.program_id;
+            let filter = RpcTransactionLogsFilter::Mentions(vec![self.channel_id.to_string()]);
+            async move {
+                loop {
+                    info!("Connecting to `{}`...", url);
+                    let client = PubsubClient::new(url.as_str())
+                        .await
+                        .expect("Failed to init `PubsubClient`");
+
+                    info!("[command_listener] Waiting a command...");
+
+                    let listener = Listener::new(&program_id, &client, &filter);
+                    match listener
+                        .on::<NewMessageEvent>(|e| {
+                            info!("[command_listener] {:?}", e);
+                            match sender.send(e) {
+                                Ok(_) => {}
+                                Err(e) => {
+                                    warn!("Failed to send event... {}", e);
+                                }
+                            }
+                        })
+                        .await
+                    {
+                        Ok(_) => {}
+                        Err(e) => {
+                            error!("[command_listener] Error: {:?}", e);
+                        }
+                    }
+                    match &client.shutdown().await {
+                        Ok(_) => {}
+                        Err(e) => {
+                            info!("[command_listener] Failed to shutdown client ({})", e);
+                        }
+                    }
+                    info!("[command_listener] Reconnecting...");
+                    tokio::time::sleep(std::time::Duration::from_millis(3000)).await;
+                }
+            }
+        })
+    }
+
+    #[tracing::instrument(skip(self, cek))]
+    async fn load_commands(&self, cek: &[u8], id_from: u64) -> Result<Vec<Task>> {
+        info!("Loading channel...");
+        let channel = self.load_channel().await?;
+        info!("Prepare commands...");
+        let mut commands = vec![];
+        for message in channel.messages {
+            if message.id > id_from {
+                if let Ok(cmd) = message.convert_to_task(cek) {
+                    commands.push(cmd);
+                }
+            }
         }
+        Ok(commands)
     }
 
     #[tracing::instrument(skip(self))]
@@ -155,25 +243,6 @@ impl Agent {
         let device = self.load_device().await?;
         info!("Decrypting CEK...");
         decrypt_cek(device.cek, self.keypair.secret().as_bytes())
-    }
-
-    #[tracing::instrument(skip(self))]
-    async fn load_commands(&self, cek: &[u8]) -> Result<Vec<Task>> {
-        info!("Loading membership...");
-        let membership = self.load_membership().await?;
-
-        info!("Loading channel...");
-        let channel = self.load_channel().await?;
-
-        info!("Prepare commands...");
-        let mut commands = vec![];
-        for message in channel.messages {
-            if message.id > membership.last_read_message_id {
-                commands.push(message.convert_to_task(cek)?);
-            }
-        }
-
-        Ok(commands)
     }
 
     async fn load_membership(&self) -> Result<ChannelMembership> {
