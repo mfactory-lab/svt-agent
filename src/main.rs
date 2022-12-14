@@ -3,6 +3,7 @@
 mod constants;
 mod encryption;
 mod listener;
+mod monitor;
 mod notifier;
 mod runner;
 mod state;
@@ -27,9 +28,7 @@ use std::fmt::Debug;
 use std::path::PathBuf;
 use std::str::FromStr;
 use std::sync::Arc;
-use tokio::sync::mpsc::UnboundedSender;
-use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver};
-use tokio::sync::RwLock;
+use tokio::sync::{mpsc, RwLock};
 use tokio::task::JoinHandle;
 use tracing::{error, info, warn};
 use tracing_subscriber::layer::SubscriberExt;
@@ -125,7 +124,7 @@ impl Agent {
             runner.write().await.add_task(command);
         }
 
-        let (sender, receiver) = unbounded_channel::<NewMessageEvent>();
+        let (sender, receiver) = mpsc::unbounded_channel::<NewMessageEvent>();
 
         let (_, _, _) = tokio::join!(
             self.command_runner(&runner),
@@ -144,7 +143,7 @@ impl Agent {
                     match runner.write().await.run().await {
                         Ok(_) => {}
                         Err(e) => {
-                            error!("Error: {}", e)
+                            error!("[command_runner] Error: {}", e)
                         }
                     };
                     info!("[command_runner] Waiting a command...");
@@ -156,7 +155,7 @@ impl Agent {
 
     fn command_processor(
         &self,
-        mut receiver: UnboundedReceiver<NewMessageEvent>,
+        mut receiver: mpsc::UnboundedReceiver<NewMessageEvent>,
         runner: Arc<RwLock<TaskRunner>>,
         cek: Vec<u8>,
     ) -> JoinHandle<()> {
@@ -176,7 +175,7 @@ impl Agent {
         })
     }
 
-    fn command_listener(&self, sender: UnboundedSender<NewMessageEvent>) -> JoinHandle<()> {
+    fn command_listener(&self, sender: mpsc::UnboundedSender<NewMessageEvent>) -> JoinHandle<()> {
         tokio::spawn({
             let url = self.cluster.ws_url().to_owned();
             let program_id = self.program_id;

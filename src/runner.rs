@@ -1,10 +1,18 @@
+use crate::monitor::TaskMonitor;
 use crate::notifier::Notifier;
 use anyhow::{Context, Error, Result};
+use std::path::PathBuf;
 use std::process::Stdio;
-use tokio::io::AsyncBufReadExt;
+use std::time::Duration;
 use tokio::process::Child;
 use tokio::process::Command;
-use tracing::{error, info};
+use tokio::time;
+use tracing::error;
+use tracing::info;
+
+const TASK_CONTAINER_NAME: &str = "svt-agent-task";
+const MONITOR_DEFAULT_PORT: u16 = 8888;
+const MONITOR_START_TIMEOUT_MS: u64 = 2000;
 
 #[derive(Debug)]
 pub struct Task {
@@ -21,29 +29,31 @@ pub struct Task {
 pub struct TaskRunner {
     /// Commands queue
     queue: Vec<Task>,
+    home_path: PathBuf,
     monitor_port: u16,
+    monitor_start_timeout_ms: u64,
 }
 
 impl TaskRunner {
     pub fn new() -> Self {
         Self {
             queue: Vec::new(),
-            monitor_port: 12345,
+            // TODO: fixme
+            home_path: PathBuf::from("/Users/tiamo/IdeaProjects/svt-agent"),
+            monitor_start_timeout_ms: MONITOR_START_TIMEOUT_MS,
+            monitor_port: MONITOR_DEFAULT_PORT,
         }
     }
 
-    // pub async fn start(&mut self) {
-    //     loop {
-    //         match self.run().await {
-    //             Ok(_) => {}
-    //             Err(e) => {
-    //                 error!("Error: {}", e)
-    //             }
-    //         };
-    //         info!("Waiting a command...");
-    //         tokio::time::sleep(std::time::Duration::from_millis(5000)).await;
-    //     }
-    // }
+    pub fn with_home_path(&mut self, path: PathBuf) -> &mut Self {
+        self.home_path = path;
+        self
+    }
+
+    pub fn with_monitor_port(&mut self, port: u16) -> &mut Self {
+        self.monitor_port = port;
+        self
+    }
 
     /// Run command from the [queue]
     #[tracing::instrument(skip(self))]
@@ -54,109 +64,55 @@ impl TaskRunner {
 
             let mut _err: Option<Error> = None;
             match self.run_task(&task) {
-                Ok(mut child) => {
+                Ok(child) => {
                     notifier.notify_start();
 
-                    let stdout = child
-                        .stdout
-                        .take()
-                        .expect("child did not have a handle to stdout");
+                    let mut monitor = TaskMonitor::new(
+                        self.monitor_port,
+                        TASK_CONTAINER_NAME,
+                        Some(task.uuid.as_str()),
+                    );
 
-                    let stderr = child
-                        .stderr
-                        .take()
-                        .expect("child did not have a handle to stderr");
+                    let monitor_start_timeout =
+                        time::sleep(Duration::from_millis(self.monitor_start_timeout_ms));
+                    tokio::pin!(monitor_start_timeout);
 
-                    let mut reader_stdout = tokio::io::BufReader::new(stdout).lines();
-                    let mut reader_stderr = tokio::io::BufReader::new(stderr).lines();
-
-                    // Ensure the child process is spawned in the runtime so it can
-                    // make progress on its own while we await for any output.
-                    let join_handle = tokio::spawn(async move {
-                        let exit_status = child
-                            .wait()
-                            .await
-                            .expect("child process encountered an error");
-
-                        exit_status
+                    let mut join_handle = tokio::spawn(async move {
+                        // time::sleep(Duration::from_millis(7000)).await;
+                        child.wait_with_output().await
                     });
 
-                    tokio::select! {
-                        msg = reader_stdout.next_line() => {
-                            match msg.unwrap() {
-                                Some(line) => {
-                                    info!(line);
-                                },
-                                None => {
-                                    info!("EOL");
-                                },
-                            };
-                        },
-                        msg = reader_stderr.next_line() => {
-                            match msg.unwrap() {
-                                Some(line) => {
-                                    info!(line);
-                                },
-                                None => {
-                                    info!("EOL");
-                                },
-                            };
-                        },
+                    loop {
+                        tokio::select! {
+                            join_res = &mut join_handle => {
+                                match join_res {
+                                    Ok(res) => match res {
+                                        Ok(output) => {
+                                            notifier.notify_finish(&output.status);
+                                            // eprintln!("output: {:?}", output)
+                                        }
+                                        Err(e) => {
+                                            _err = Some(Error::from(e));
+                                        }
+                                    },
+                                    Err(e) => {
+                                        _err = Some(Error::from(e));
+                                    }
+                                }
+                                break;
+                            }
+                            _ = &mut monitor_start_timeout, if !monitor_start_timeout.is_elapsed() => {
+                                if let Err(e) = monitor.start() {
+                                    error!("Failed to start monitor. {}", e);
+                                }
+                            }
+                            else => { break }
+                        }
                     }
 
-                    let exit_status = join_handle.await.ok();
-
-                    println!("exit_status: {:?}", exit_status);
-
-                    // tokio::select! {
-                    //     child_res = child.wait() => {
-                    //         info!("Finished");
-                    //         if let Err(err) = child_res {
-                    //             info!("Failed to run task on the replay. Error: {}", err);
-                    //         }
-                    //
-                    //         if let Some(mut stderr) = child.stderr {
-                    //             let mut res = String::new();
-                    //             if stderr.read_to_string(&mut res).await.is_ok() {
-                    //                 info!("Command stderr: {res}");
-                    //             }
-                    //             info!("Finished command stderr");
-                    //         }
-                    //     }
-                    // }
-
-                    // let tasklet = tokio::spawn(async { child.wait_with_output().await });
-
-                    // this delay should give tokio::spawn plenty of time to spin up
-                    // and call `wait` on the child (closing stdin)
-                    // time::sleep(Duration::from_millis(2000)).await;
-                    //
-                    // match tasklet.await {
-                    //     Ok(exit_result) => match exit_result {
-                    //         Ok(exit_status) => eprintln!("exit_status: {:?}", exit_status),
-                    //         Err(terminate_error) => {
-                    //             eprintln!("terminate_error: {}", terminate_error)
-                    //         }
-                    //     },
-                    //     Err(join_error) => eprintln!("join_error: {}", join_error),
-                    // }
-
-                    // let monitor = self.start_monitor(&task);
-
-                    // match child.wait_with_output().await {
-                    //     Ok(output) => {
-                    //         println!("OOOKKKK");
-                    //         notifier.notify_finish(&output.status);
-                    //     }
-                    //     Err(e) => {
-                    //         println!("ERRRRROOORRR");
-                    //         _err = Some(Error::from(e));
-                    //     }
-                    // }
-
-                    // if monitor.is_ok() {
-                    //     monitor.unwrap().kill().await?;
-                    // }
+                    if let Err(e) = monitor.stop().await {
+                        error!("Failed to stop monitor. {}", e);
+                    }
                 }
                 Err(e) => {
                     info!("Failed to run command");
@@ -182,40 +138,31 @@ impl TaskRunner {
 
         cmd.args([
             "run",
-            "-v ~/playbooks:/work:ro",
+            "-v",
+            &format!("{}/playbooks:/work:ro", self.home_path.to_str().unwrap()),
             // "-v ~/.ansible/roles:/root/.ansible/roles",
-            "-v ~/.ssh:/root/.ssh:ro",
+            // "-v ~/.ssh:/root/.ssh:ro",
             "--rm",
+            "--name",
+            TASK_CONTAINER_NAME,
             "spy86/ansible:latest",
+        ]);
+
+        cmd.args([
             "ansible-playbook",
-            format!("{}.yml", task.playbook).as_str(),
-            format!("-e \"{}\"", task.extra_vars.as_str()).as_str(),
+            &format!("{}.yml", "test"),
+            &format!("-e \"{}\"", task.extra_vars.as_str()),
+            "-vvv",
         ]);
 
         // verbosity
         // cmd.args(["-vvv"]);
 
+        info!("Executing... {:?}", cmd.as_std());
+
         cmd.stdout(Stdio::piped());
         cmd.stderr(Stdio::piped());
         cmd.kill_on_drop(true);
         cmd.spawn().context("Running task")
-    }
-
-    #[tracing::instrument(skip(self, task))]
-    fn start_monitor(&self, task: &Task) -> Result<Child> {
-        Command::new("docker")
-            .args([
-                "run",
-                format!("-p {}:8080", self.monitor_port).as_str(),
-                "-v /var/run/docker.sock:/var/run/docker.sock",
-                "amir20/dozzle:latest",
-            ])
-            .env("DOZZLE_FILTER", "svt-agent")
-            .env("DOZZLE_NO_ANALYTICS", "true")
-            .env("DOZZLE_USERNAME", "admin")
-            .env("DOZZLE_PASSWORD", task.uuid.as_str())
-            .kill_on_drop(true)
-            .spawn()
-            .context("Running monitoring")
     }
 }

@@ -43,7 +43,7 @@ impl<'a> Listener<'a> {
             .await?;
 
         while let Some(log) = stream.next().await {
-            match self.handle_event::<T>(&log, &cb).await {
+            match self.handle_event::<T>(&log, &cb) {
                 Ok(_) => {}
                 Err(e) => {
                     info!("[Listener] Error: {}", e);
@@ -57,7 +57,7 @@ impl<'a> Listener<'a> {
         Ok(())
     }
 
-    async fn handle_event<T>(&self, log: &Response<RpcLogsResponse>, cb: &impl Fn(T)) -> Result<()>
+    fn handle_event<T>(&self, log: &Response<RpcLogsResponse>, cb: &impl Fn(T)) -> Result<()>
     where
         T: Event,
     {
