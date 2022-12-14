@@ -1,9 +1,4 @@
-use crate::constants::COMMAND_DELIMITER;
-use crate::encryption::decrypt_message;
-use crate::runner::Task;
-use anchor_lang::prelude::borsh::BorshSerialize;
 use anchor_lang::prelude::*;
-use anyhow::{Error, Result};
 
 #[derive(AnchorSerialize, AnchorDeserialize, Debug)]
 pub struct Channel {
@@ -91,29 +86,6 @@ pub struct Message {
     pub flags: u8,
     /// The (typically encrypted) message content
     pub content: String,
-}
-
-impl Message {
-    pub fn convert_to_task(&self, cek: &[u8]) -> Result<Task> {
-        let cmd = String::from_utf8(decrypt_message(&self.content, cek)?)?;
-        let parts = cmd.split(COMMAND_DELIMITER).collect::<Vec<_>>();
-
-        if parts.len() < 3 {
-            return Err(Error::msg("Invalid command"));
-        }
-
-        let playbook = String::from(parts[0]);
-        // TODO: validate
-        let extra_vars = String::from(parts[1]);
-        let uuid = String::from(parts[2]);
-
-        Ok(Task {
-            id: self.id,
-            uuid,
-            playbook,
-            extra_vars,
-        })
-    }
 }
 
 #[event]

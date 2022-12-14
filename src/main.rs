@@ -12,6 +12,7 @@ mod utils;
 use crate::encryption::decrypt_cek;
 use crate::listener::Listener;
 use crate::runner::{Task, TaskRunner};
+use crate::utils::convert_message_to_task;
 use anchor_client::solana_client::nonblocking::pubsub_client::PubsubClient;
 use anchor_client::solana_client::nonblocking::rpc_client::RpcClient;
 use anchor_client::solana_client::rpc_config::RpcTransactionLogsFilter;
@@ -161,8 +162,8 @@ impl Agent {
     ) -> JoinHandle<()> {
         tokio::spawn({
             async move {
-                while let Some(msg) = receiver.recv().await {
-                    match msg.message.convert_to_task(cek.as_slice()) {
+                while let Some(e) = receiver.recv().await {
+                    match convert_message_to_task(e.message, cek.as_slice()) {
                         Ok(task) => {
                             runner.write().await.add_task(task);
                         }
@@ -228,7 +229,7 @@ impl Agent {
         let mut commands = vec![];
         for message in channel.messages {
             if message.id > id_from {
-                if let Ok(cmd) = message.convert_to_task(cek) {
+                if let Ok(cmd) = convert_message_to_task(message, cek) {
                     commands.push(cmd);
                 }
             }

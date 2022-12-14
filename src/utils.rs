@@ -1,17 +1,27 @@
-use crate::constants::MESSENGER_PROGRAM_ID;
-use anchor_lang::prelude::Pubkey;
-use std::str::FromStr;
+use crate::constants::COMMAND_DELIMITER;
+use crate::encryption::decrypt_message;
+use crate::runner::Task;
+use crate::state::Message;
+use anyhow::Error;
+use anyhow::Result;
 
-pub fn get_membership_pda(channel: &Pubkey, authority: &Pubkey) -> (Pubkey, u8) {
-    Pubkey::find_program_address(
-        &[&channel.to_bytes(), &authority.to_bytes()],
-        &Pubkey::from_str(MESSENGER_PROGRAM_ID).expect("Invalid messenger program id"),
-    )
-}
+pub fn convert_message_to_task(msg: Message, cek: &[u8]) -> Result<Task> {
+    let cmd = String::from_utf8(decrypt_message(msg.content, cek)?)?;
+    let parts = cmd.split(COMMAND_DELIMITER).collect::<Vec<_>>();
 
-pub fn get_channel_pda(membership: &Pubkey, key: &Pubkey) -> (Pubkey, u8) {
-    Pubkey::find_program_address(
-        &[&membership.to_bytes(), &key.to_bytes()],
-        &Pubkey::from_str(MESSENGER_PROGRAM_ID).expect("Invalid messenger program id"),
-    )
+    if parts.len() < 3 {
+        return Err(Error::msg("Invalid command"));
+    }
+
+    let playbook = String::from(parts[0]);
+    // TODO: validate
+    let extra_vars = String::from(parts[1]);
+    let uuid = String::from(parts[2]);
+
+    Ok(Task {
+        id: msg.id,
+        uuid,
+        playbook,
+        extra_vars,
+    })
 }
