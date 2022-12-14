@@ -12,6 +12,7 @@ use tracing::info;
 
 const TASK_CONTAINER_NAME: &str = "svt-agent-task";
 const MONITOR_DEFAULT_PORT: u16 = 8888;
+/// Prevent starting the monitoring when commands executes immediately
 const MONITOR_START_TIMEOUT_MS: u64 = 2000;
 
 #[derive(Debug)]
@@ -88,16 +89,12 @@ impl TaskRunner {
                                 match join_res {
                                     Ok(res) => match res {
                                         Ok(output) => {
-                                            notifier.notify_finish(&output.status);
+                                            notifier.notify_finish(&output);
                                             // eprintln!("output: {:?}", output)
                                         }
-                                        Err(e) => {
-                                            _err = Some(Error::from(e));
-                                        }
+                                        Err(e) => _err = Some(Error::from(e))
                                     },
-                                    Err(e) => {
-                                        _err = Some(Error::from(e));
-                                    }
+                                    Err(e) => _err = Some(Error::from(e))
                                 }
                                 break;
                             }

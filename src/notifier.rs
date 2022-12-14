@@ -1,6 +1,6 @@
 use crate::runner::Task;
 use anyhow::Error;
-use std::process::ExitStatus;
+use std::process::Output;
 use tracing::info;
 
 pub struct Notifier<'a> {
@@ -23,8 +23,8 @@ impl<'a> Notifier<'a> {
     }
 
     #[tracing::instrument(skip(self))]
-    pub fn notify_finish(&self, status: &ExitStatus) {
-        info!("[Notifier] Finish: {}", status);
+    pub fn notify_finish(&self, output: &Output) {
+        info!("[Notifier] Finish: {}", output.status);
         self.notify("finish");
     }
 

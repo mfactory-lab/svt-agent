@@ -3,6 +3,10 @@ use std::process::Stdio;
 use tokio::process::{Child, Command};
 use tracing::info;
 
+///
+/// Think about web endpoint with `docker logs` output
+///
+
 const DEFAULT_USERNAME: &str = "admin";
 
 pub struct TaskMonitor<'a> {
