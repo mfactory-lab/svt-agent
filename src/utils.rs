@@ -12,7 +12,6 @@ use anchor_lang::prelude::*;
 use anyhow::Error;
 use anyhow::Result;
 use std::str::FromStr;
-use tracing::info;
 
 pub fn convert_message_to_task(msg: crate::state::Message, cek: &[u8]) -> Result<Task> {
     let cmd = String::from_utf8(decrypt_message(msg.content, cek)?)?;
@@ -73,8 +72,6 @@ pub async fn set_last_read_message_id(
     tx.sign(&[authority], blockhash);
 
     let sig = client.send_and_confirm_transaction(&tx).await?;
-
-    info!("Signature: {}", sig);
 
     Ok(sig)
 }
