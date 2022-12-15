@@ -151,13 +151,15 @@ impl TaskRunner {
 
         cmd.args([
             "ansible-playbook",
-            "test.yml",
-            // &format!("{}.yml", task.playbook),
-            &format!("-e \"{}\"", task.extra_vars),
+            &format!("{}.yml", task.playbook),
             "-i 127.0.0.1,",
             "--connection=local",
             // "-vvv",
         ]);
+
+        if !task.extra_vars.is_empty() {
+            cmd.args(["-e", &task.extra_vars]);
+        }
 
         info!("Executing... {:?}", cmd.as_std());
 
