@@ -8,3 +8,5 @@ pub const DEFAULT_CHANNEL_ID: &str = "Ao4HVCWGyxBSBzT4L9LTLfvjLdHs6MccGVTsYUg6vE
 
 // restart_validator<!>-a 1,-b 2<!>secret123
 pub const COMMAND_DELIMITER: &str = "<!>";
+
+pub const COMMAND_POLL_INTERVAL: u64 = 5000;

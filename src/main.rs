@@ -143,22 +143,30 @@ impl Agent {
         tokio::spawn({
             let runner = self.runner.clone();
             let rpc = self.rpc.clone();
-            let channel_id = self.channel_id;
+
             let keypair =
                 Keypair::from_bytes(self.keypair.to_bytes().as_slice()).expect("Invalid keypair");
+            let channel_id = self.channel_id;
+
             async move {
                 loop {
                     match runner.write().await.run().await {
                         Ok(maybe_task) => {
                             if let Some(task) = maybe_task {
-                                set_last_read_message_id(
-                                    &rpc,
-                                    task,
-                                    &channel_id,
-                                    &channel_id,
-                                    &keypair,
-                                )
-                                .await;
+                                info!("[command_runner] Confirming Task#{}...", task.id);
+                                match set_last_read_message_id(&rpc, task.id, &channel_id, &keypair)
+                                    .await
+                                {
+                                    Ok(sig) => {
+                                        info!(
+                                            "[command_runner] Confirmed Task#{}! Signature: {}",
+                                            task.id, sig
+                                        );
+                                    }
+                                    Err(e) => {
+                                        error!("[command_runner] Error: {}", e);
+                                    }
+                                }
                             }
                         }
                         Err(e) => {
@@ -166,7 +174,8 @@ impl Agent {
                         }
                     };
                     info!("[command_runner] Waiting a command...");
-                    tokio::time::sleep(std::time::Duration::from_millis(5000)).await;
+                    tokio::time::sleep(std::time::Duration::from_millis(COMMAND_POLL_INTERVAL))
+                        .await;
                 }
             }
         })
