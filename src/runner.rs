@@ -33,6 +33,7 @@ pub struct TaskRunner {
     home_path: PathBuf,
     monitor_port: u16,
     monitor_start_timeout_ms: u64,
+    container_name: String,
 }
 
 impl TaskRunner {
@@ -43,6 +44,7 @@ impl TaskRunner {
             home_path: PathBuf::from("/Users/tiamo/IdeaProjects/svt-agent"),
             monitor_start_timeout_ms: MONITOR_START_TIMEOUT_MS,
             monitor_port: MONITOR_DEFAULT_PORT,
+            container_name: TASK_CONTAINER_NAME.to_string(),
         }
     }
 
@@ -58,21 +60,20 @@ impl TaskRunner {
 
     /// Run command from the [queue]
     #[tracing::instrument(skip(self))]
-    pub async fn run(&mut self) -> Result<()> {
+    pub async fn run(&mut self) -> Result<Option<Task>> {
         if let Some(task) = self.queue.pop() {
             let notifier = Notifier::new(&task);
             notifier.notify_pre_start();
 
             let mut _err: Option<Error> = None;
+            let mut is_success = false;
+
             match self.run_task(&task) {
                 Ok(child) => {
                     notifier.notify_start();
 
-                    let mut monitor = TaskMonitor::new(
-                        self.monitor_port,
-                        TASK_CONTAINER_NAME,
-                        Some(task.uuid.as_str()),
-                    );
+                    let mut monitor =
+                        TaskMonitor::new(self.monitor_port, &self.container_name, Some(&task.uuid));
 
                     let monitor_start_timeout =
                         time::sleep(Duration::from_millis(self.monitor_start_timeout_ms));
@@ -90,6 +91,7 @@ impl TaskRunner {
                                     Ok(res) => match res {
                                         Ok(output) => {
                                             notifier.notify_finish(&output);
+                                            is_success = output.status.success();
                                             // eprintln!("output: {:?}", output)
                                         }
                                         Err(e) => _err = Some(Error::from(e))
@@ -116,17 +118,17 @@ impl TaskRunner {
                     _err = Some(e);
                 }
             }
+
             if let Some(e) = _err {
                 notifier.notify_error(&e);
                 return Err(e);
             }
-        }
-        Ok(())
-    }
 
-    /// Add new [task] to the [queue]
-    pub fn add_task(&mut self, task: Task) {
-        self.queue.push(task);
+            if is_success {
+                return Ok(Some(task));
+            }
+        }
+        Ok(None)
     }
 
     #[tracing::instrument(skip(self))]
@@ -141,19 +143,19 @@ impl TaskRunner {
             // "-v ~/.ssh:/root/.ssh:ro",
             "--rm",
             "--name",
-            TASK_CONTAINER_NAME,
+            &self.container_name,
             "spy86/ansible:latest",
         ]);
 
         cmd.args([
             "ansible-playbook",
-            &format!("{}.yml", "test"),
-            &format!("-e \"{}\"", task.extra_vars.as_str()),
-            "-vvv",
+            "test.yml",
+            // &format!("{}.yml", task.playbook),
+            &format!("-e \"{}\"", task.extra_vars),
+            "-i 127.0.0.1,",
+            "--connection=local",
+            // "-vvv",
         ]);
-
-        // verbosity
-        // cmd.args(["-vvv"]);
 
         info!("Executing... {:?}", cmd.as_std());
 
@@ -161,5 +163,10 @@ impl TaskRunner {
         cmd.stderr(Stdio::piped());
         cmd.kill_on_drop(true);
         cmd.spawn().context("Running task")
+    }
+
+    /// Add new [task] to the [queue]
+    pub fn add_task(&mut self, task: Task) {
+        self.queue.push(task);
     }
 }

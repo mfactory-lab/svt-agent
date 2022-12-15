@@ -12,7 +12,7 @@ mod utils;
 use crate::encryption::decrypt_cek;
 use crate::listener::Listener;
 use crate::runner::{Task, TaskRunner};
-use crate::utils::convert_message_to_task;
+use crate::utils::{convert_message_to_task, set_last_read_message_id};
 use anchor_client::solana_client::nonblocking::pubsub_client::PubsubClient;
 use anchor_client::solana_client::nonblocking::rpc_client::RpcClient;
 use anchor_client::solana_client::rpc_config::RpcTransactionLogsFilter;
@@ -82,7 +82,8 @@ struct Agent {
     channel_id: Pubkey,
     /// Solana cluster
     cluster: Cluster,
-    rpc: RpcClient,
+    rpc: Arc<RpcClient>,
+    runner: Arc<RwLock<TaskRunner>>,
 }
 
 impl Agent {
@@ -92,16 +93,19 @@ impl Agent {
         let program_id = Pubkey::from_str(&cli.messenger_program_id)?;
         let channel_id = Pubkey::from_str(&cli.channel_id)?;
 
-        let rpc = RpcClient::new_with_commitment(
+        let rpc = Arc::new(RpcClient::new_with_commitment(
             cli.cluster.url().to_string(),
             CommitmentConfig::confirmed(),
-        );
+        ));
+
+        let runner = Arc::new(RwLock::new(TaskRunner::new()));
 
         Ok(Self {
             program_id,
             channel_id,
             keypair,
             cluster: cli.cluster,
+            runner,
             rpc,
         })
     }
@@ -113,36 +117,50 @@ impl Agent {
 
         let cek = self.load_cek().await?;
         let membership = self.load_membership().await?;
-        let commands = self
+
+        let initial_commands = self
             .load_commands(cek.as_slice(), membership.last_read_message_id)
             .await?;
 
-        info!("Added {} commands to the queue...", commands.len());
+        info!("Added {} commands to the queue...", initial_commands.len());
 
-        let runner = Arc::new(RwLock::new(TaskRunner::new()));
-
-        for command in commands {
-            runner.write().await.add_task(command);
+        for command in initial_commands {
+            self.runner.write().await.add_task(command);
         }
 
         let (sender, receiver) = mpsc::unbounded_channel::<NewMessageEvent>();
 
         let (_, _, _) = tokio::join!(
-            self.command_runner(&runner),
+            self.command_runner(),
             self.command_listener(sender),
-            self.command_processor(receiver, runner, cek),
+            self.command_processor(receiver, cek),
         );
 
         Ok(())
     }
 
-    fn command_runner(&self, runner: &Arc<RwLock<TaskRunner>>) -> JoinHandle<()> {
+    fn command_runner(&self) -> JoinHandle<()> {
         tokio::spawn({
-            let runner = runner.clone();
+            let runner = self.runner.clone();
+            let rpc = self.rpc.clone();
+            let channel_id = self.channel_id;
+            let keypair =
+                Keypair::from_bytes(self.keypair.to_bytes().as_slice()).expect("Invalid keypair");
             async move {
                 loop {
                     match runner.write().await.run().await {
-                        Ok(_) => {}
+                        Ok(maybe_task) => {
+                            if let Some(task) = maybe_task {
+                                set_last_read_message_id(
+                                    &rpc,
+                                    task,
+                                    &channel_id,
+                                    &channel_id,
+                                    &keypair,
+                                )
+                                .await;
+                            }
+                        }
                         Err(e) => {
                             error!("[command_runner] Error: {}", e)
                         }
@@ -157,10 +175,10 @@ impl Agent {
     fn command_processor(
         &self,
         mut receiver: mpsc::UnboundedReceiver<NewMessageEvent>,
-        runner: Arc<RwLock<TaskRunner>>,
         cek: Vec<u8>,
     ) -> JoinHandle<()> {
         tokio::spawn({
+            let runner = self.runner.clone();
             async move {
                 while let Some(e) = receiver.recv().await {
                     match convert_message_to_task(e.message, cek.as_slice()) {

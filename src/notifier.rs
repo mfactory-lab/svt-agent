@@ -5,11 +5,15 @@ use tracing::info;
 
 pub struct Notifier<'a> {
     task: &'a Task,
+    webhook_url: &'a str,
 }
 
 impl<'a> Notifier<'a> {
     pub fn new(task: &'a Task) -> Self {
-        Self { task }
+        Self {
+            task,
+            webhook_url: "",
+        }
     }
 
     #[tracing::instrument(skip(self))]
