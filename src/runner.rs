@@ -63,7 +63,7 @@ impl TaskRunner {
     #[tracing::instrument(skip(self))]
     pub async fn run(&mut self) -> Result<Option<Task>> {
         if let Some(task) = self.queue.pop_front() {
-            let notifier = Notifier::new(&task);
+            let mut notifier = Notifier::new(&task);
             notifier.notify_pre_start();
 
             let mut _err: Option<Error> = None;
@@ -71,7 +71,7 @@ impl TaskRunner {
 
             match self.run_task(&task) {
                 Ok(child) => {
-                    notifier.notify_start();
+                    notifier.notify_start().await;
 
                     let mut monitor =
                         TaskMonitor::new(self.monitor_port, &self.container_name, Some(&task.uuid));
@@ -91,8 +91,8 @@ impl TaskRunner {
                                 match join_res {
                                     Ok(res) => match res {
                                         Ok(output) => {
-                                            notifier.notify_finish(&output);
                                             is_success = output.status.success();
+                                            notifier.notify_finish(output).await;
                                             // eprintln!("output: {:?}", output)
                                         }
                                         Err(e) => _err = Some(Error::from(e))
@@ -122,7 +122,7 @@ impl TaskRunner {
             }
 
             if let Some(e) = _err {
-                notifier.notify_error(&e);
+                notifier.notify_error(&e).await;
                 return Err(e);
             }
 

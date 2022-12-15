@@ -9,7 +9,7 @@ pub struct Notifier<'a> {
     task: &'a Task,
     webhook_url: &'a str,
     error: Option<&'a Error>,
-    output: Option<&'a Output>,
+    output: Option<Output>,
 }
 
 impl<'a> Notifier<'a> {
@@ -33,7 +33,7 @@ impl<'a> Notifier<'a> {
     }
 
     #[tracing::instrument(skip(self))]
-    pub async fn notify_finish(&mut self, output: &'a Output) -> Result<()> {
+    pub async fn notify_finish(&mut self, output: Output) -> Result<()> {
         self.output = Some(output);
         self.notify("finish").await
     }
@@ -44,16 +44,19 @@ impl<'a> Notifier<'a> {
         self.notify("error").await
     }
 
-    pub async fn notify(&self, event: &str) -> Result<()> {
+    async fn notify(&self, event: &str) -> Result<()> {
+        info!("Task#{} notify_{}", self.task.id, event);
+
         // TODO: send influx state
 
         if !self.webhook_url.is_empty() {
             let client = hyper::Client::new();
 
-            let status = self.output.map(|s| s.status.to_string());
+            let status = self.output.as_ref().map(|s| s.status.to_string());
             let error = self.error.map(|e| e.to_string());
             let stdout = self
                 .output
+                .as_ref()
                 .map(|s| String::from_utf8(s.stdout.clone()).unwrap());
 
             let data = json!({
