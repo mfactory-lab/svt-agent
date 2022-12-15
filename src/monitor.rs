@@ -39,16 +39,16 @@ impl<'a> TaskMonitor<'a> {
             "-p",
             &format!("{}:8080", self.port),
             "--rm",
-            "--init",
             "amir20/dozzle:latest",
-        ])
-        .env("DOZZLE_FILTER", self.filter)
-        .env("DOZZLE_NO_ANALYTICS", "true");
+            "--filter",
+            &format!("name={}", self.filter),
+            "--no-analytics",
+        ]);
 
+        // cmd.env("DOZZLE_NO_ANALYTICS", "true");
         if let Some(password) = self.password {
             if !password.is_empty() {
-                cmd.env("DOZZLE_USERNAME", self.username);
-                cmd.env("DOZZLE_PASSWORD", password);
+                cmd.args(["--username", self.username, "--password", password]);
             }
         }
 
