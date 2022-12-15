@@ -1,6 +1,7 @@
 use crate::monitor::TaskMonitor;
 use crate::notifier::Notifier;
 use anyhow::{Context, Error, Result};
+use std::collections::VecDeque;
 use std::path::PathBuf;
 use std::process::Stdio;
 use std::time::Duration;
@@ -29,7 +30,7 @@ pub struct Task {
 
 pub struct TaskRunner {
     /// Commands queue
-    queue: Vec<Task>,
+    queue: VecDeque<Task>,
     home_path: PathBuf,
     monitor_port: u16,
     monitor_start_timeout_ms: u64,
@@ -39,7 +40,7 @@ pub struct TaskRunner {
 impl TaskRunner {
     pub fn new() -> Self {
         Self {
-            queue: Vec::new(),
+            queue: VecDeque::new(),
             // TODO: fixme
             home_path: PathBuf::from("/Users/tiamo/IdeaProjects/svt-agent"),
             monitor_start_timeout_ms: MONITOR_START_TIMEOUT_MS,
@@ -61,7 +62,7 @@ impl TaskRunner {
     /// Run command from the [queue]
     #[tracing::instrument(skip(self))]
     pub async fn run(&mut self) -> Result<Option<Task>> {
-        if let Some(task) = self.queue.pop() {
+        if let Some(task) = self.queue.pop_front() {
             let notifier = Notifier::new(&task);
             notifier.notify_pre_start();
 
@@ -101,6 +102,7 @@ impl TaskRunner {
                                 break;
                             }
                             _ = &mut monitor_start_timeout, if !monitor_start_timeout.is_elapsed() => {
+                                info!("Starting monitor...");
                                 if let Err(e) = monitor.start() {
                                     error!("Failed to start monitor. {}", e);
                                 }
@@ -167,6 +169,6 @@ impl TaskRunner {
 
     /// Add new [task] to the [queue]
     pub fn add_task(&mut self, task: Task) {
-        self.queue.push(task);
+        self.queue.push_back(task);
     }
 }
