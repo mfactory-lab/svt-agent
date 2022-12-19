@@ -11,10 +11,11 @@ use tokio::time;
 use tracing::error;
 use tracing::info;
 
+/// Used to filter containers by the monitor instance
 const TASK_CONTAINER_NAME: &str = "svt-agent-task";
-const MONITOR_DEFAULT_PORT: u16 = 8888;
 /// Prevent starting the monitoring when commands executes immediately
 const MONITOR_START_TIMEOUT_MS: u64 = 2000;
+const MONITOR_DEFAULT_PORT: u16 = 8888;
 
 #[derive(Debug)]
 pub struct Task {
@@ -29,7 +30,7 @@ pub struct Task {
 }
 
 pub struct TaskRunner {
-    /// Commands queue
+    /// The [Task] queue
     queue: VecDeque<Task>,
     home_path: PathBuf,
     monitor_port: u16,
@@ -59,7 +60,7 @@ impl TaskRunner {
         self
     }
 
-    /// Run command from the [queue]
+    /// Try to run the front task from the [queue] and start the monitor instance if needed.
     #[tracing::instrument(skip(self))]
     pub async fn run(&mut self) -> Result<Option<Task>> {
         if let Some(task) = self.queue.pop_front() {
