@@ -45,7 +45,6 @@ impl<'a> TaskMonitor<'a> {
             "--no-analytics",
         ]);
 
-        // cmd.env("DOZZLE_NO_ANALYTICS", "true");
         if let Some(password) = self.password {
             if !password.is_empty() {
                 cmd.args(["--username", self.username, "--password", password]);

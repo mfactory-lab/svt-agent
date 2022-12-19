@@ -64,7 +64,7 @@ impl TaskRunner {
     pub async fn run(&mut self) -> Result<Option<Task>> {
         if let Some(task) = self.queue.pop_front() {
             let mut notifier = Notifier::new(&task);
-            notifier.notify_pre_start();
+            notifier.notify_pre_start().await;
 
             let mut _err: Option<Error> = None;
             let mut is_success = false;
@@ -135,22 +135,21 @@ impl TaskRunner {
 
     #[tracing::instrument(skip(self))]
     fn run_task(&self, task: &Task) -> Result<Child> {
-        let mut cmd = Command::new("docker");
+        // let mut cmd = Command::new("docker");
+        // cmd.args([
+        //     "run",
+        //     "-v",
+        //     &format!("{}/playbooks:/work:ro", self.home_path.to_str().unwrap()),
+        //     // "-v ~/.ansible/roles:/root/.ansible/roles",
+        //     // "-v ~/.ssh:/root/.ssh:ro",
+        //     "--rm",
+        //     "--name",
+        //     &self.container_name,
+        //     "spy86/ansible:latest",
+        // ]);
 
+        let mut cmd = Command::new("ansible-playbook");
         cmd.args([
-            "run",
-            "-v",
-            &format!("{}/playbooks:/work:ro", self.home_path.to_str().unwrap()),
-            // "-v ~/.ansible/roles:/root/.ansible/roles",
-            // "-v ~/.ssh:/root/.ssh:ro",
-            "--rm",
-            "--name",
-            &self.container_name,
-            "spy86/ansible:latest",
-        ]);
-
-        cmd.args([
-            "ansible-playbook",
             &format!("{}.yml", task.playbook),
             "-i 127.0.0.1,",
             "--connection=local",
@@ -170,7 +169,8 @@ impl TaskRunner {
     }
 
     /// Add new [task] to the [queue]
-    pub fn add_task(&mut self, task: Task) {
+    pub fn add_task(&mut self, task: Task) -> &mut Self {
         self.queue.push_back(task);
+        self
     }
 }

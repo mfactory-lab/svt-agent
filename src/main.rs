@@ -9,18 +9,14 @@ mod runner;
 mod state;
 mod utils;
 
-use crate::encryption::decrypt_cek;
 use crate::listener::Listener;
 use crate::runner::{Task, TaskRunner};
-use crate::utils::{convert_message_to_task, set_last_read_message_id};
+use crate::utils::{convert_message_to_task, messenger::MessengerClient};
 use anchor_client::solana_client::nonblocking::pubsub_client::PubsubClient;
-use anchor_client::solana_client::nonblocking::rpc_client::RpcClient;
 use anchor_client::solana_client::rpc_config::RpcTransactionLogsFilter;
-use anchor_client::solana_sdk::commitment_config::CommitmentConfig;
 use anchor_client::solana_sdk::pubkey::Pubkey;
-use anchor_client::solana_sdk::signature::{read_keypair_file, Keypair, Signer};
+use anchor_client::solana_sdk::signature::read_keypair_file;
 use anchor_client::Cluster;
-use anchor_lang::AnchorDeserialize;
 use anyhow::Result;
 use clap::Parser;
 use constants::*;
@@ -74,39 +70,31 @@ async fn main() -> Result<()> {
 }
 
 struct Agent {
-    /// Keypair is used for decrypting messages from the channel
-    keypair: Keypair,
     /// Messenger program id
     program_id: Pubkey,
-    /// Channel identifier
+    /// The [Channel] identifier
     channel_id: Pubkey,
-    /// Solana cluster
-    cluster: Cluster,
-    rpc: Arc<RpcClient>,
+    /// Messenger client instance
+    client: Arc<MessengerClient>,
+    /// Task runner instance
     runner: Arc<RwLock<TaskRunner>>,
 }
 
 impl Agent {
     #[tracing::instrument]
     fn new(cli: Cli) -> Result<Self> {
-        let keypair = read_keypair_file(cli.keypair).expect("Keypair required");
+        let keypair = read_keypair_file(cli.keypair).expect("Authority keypair required");
         let program_id = Pubkey::from_str(&cli.messenger_program_id)?;
         let channel_id = Pubkey::from_str(&cli.channel_id)?;
 
-        let rpc = Arc::new(RpcClient::new_with_commitment(
-            cli.cluster.url().to_string(),
-            CommitmentConfig::confirmed(),
-        ));
-
         let runner = Arc::new(RwLock::new(TaskRunner::new()));
+        let client = Arc::new(MessengerClient::new(cli.cluster, program_id, keypair));
 
         Ok(Self {
             program_id,
             channel_id,
-            keypair,
-            cluster: cli.cluster,
             runner,
-            rpc,
+            client,
         })
     }
 
@@ -115,8 +103,8 @@ impl Agent {
         info!("Program ID {:?}", self.program_id);
         info!("Channel ID {:?}", self.channel_id);
 
-        let cek = self.load_cek().await?;
-        let membership = self.load_membership().await?;
+        let cek = self.client.load_cek(&self.channel_id).await?;
+        let membership = self.client.load_membership(&self.channel_id).await?;
 
         let initial_commands = self
             .load_commands(cek.as_slice(), membership.last_read_message_id)
@@ -142,10 +130,7 @@ impl Agent {
     fn command_runner(&self) -> JoinHandle<()> {
         tokio::spawn({
             let runner = self.runner.clone();
-            let rpc = self.rpc.clone();
-
-            let keypair =
-                Keypair::from_bytes(self.keypair.to_bytes().as_slice()).expect("Invalid keypair");
+            let client = self.client.clone();
             let channel_id = self.channel_id;
 
             async move {
@@ -154,9 +139,8 @@ impl Agent {
                         Ok(maybe_task) => {
                             if let Some(task) = maybe_task {
                                 info!("[command_runner] Confirming Task#{}...", task.id);
-                                match set_last_read_message_id(&rpc, task.id, &channel_id, &keypair)
-                                    .await
-                                {
+
+                                match client.read_message(task.id, &channel_id).await {
                                     Ok(sig) => {
                                         info!(
                                             "[command_runner] Confirmed Task#{}! Signature: {}",
@@ -205,7 +189,7 @@ impl Agent {
 
     fn command_listener(&self, sender: mpsc::UnboundedSender<NewMessageEvent>) -> JoinHandle<()> {
         tokio::spawn({
-            let url = self.cluster.ws_url().to_owned();
+            let url = self.client.cluster.ws_url().to_owned();
             let program_id = self.program_id;
             let filter = RpcTransactionLogsFilter::Mentions(vec![self.channel_id.to_string()]);
             async move {
@@ -251,7 +235,7 @@ impl Agent {
     #[tracing::instrument(skip(self, cek))]
     async fn load_commands(&self, cek: &[u8], id_from: u64) -> Result<Vec<Task>> {
         info!("Loading channel...");
-        let channel = self.load_channel().await?;
+        let channel = self.client.load_channel(&self.channel_id).await?;
         info!("Prepare commands...");
         let mut commands = vec![];
         for message in channel.messages {
@@ -263,52 +247,11 @@ impl Agent {
         }
         Ok(commands)
     }
-
-    #[tracing::instrument(skip(self))]
-    async fn load_cek(&self) -> Result<Vec<u8>> {
-        info!("Loading device...");
-        let device = self.load_device().await?;
-        info!("Decrypting CEK...");
-        decrypt_cek(device.cek, self.keypair.secret().as_bytes())
-    }
-
-    async fn load_membership(&self) -> Result<ChannelMembership> {
-        let pda = self.get_membership_pda(&self.channel_id, &self.keypair.pubkey());
-        self.load_account(&pda.0).await
-    }
-
-    async fn load_device(&self) -> Result<ChannelDevice> {
-        let membership_pda = self.get_membership_pda(&self.channel_id, &self.keypair.pubkey());
-        let pda = self.get_device_pda(&membership_pda.0, &self.keypair.pubkey());
-        self.load_account(&pda.0).await
-    }
-
-    async fn load_channel(&self) -> Result<Channel> {
-        self.load_account(&self.channel_id).await
-    }
-
-    async fn load_account<T: AnchorDeserialize>(&self, addr: &Pubkey) -> Result<T> {
-        let data = self.rpc.get_account_data(addr).await?;
-        // skip anchor discriminator
-        let account = T::deserialize(&mut &data.as_slice()[8..])?;
-        Ok(account)
-    }
-
-    fn get_membership_pda(&self, channel: &Pubkey, authority: &Pubkey) -> (Pubkey, u8) {
-        Pubkey::find_program_address(
-            &[&channel.to_bytes(), &authority.to_bytes()],
-            &self.program_id,
-        )
-    }
-
-    fn get_device_pda(&self, membership: &Pubkey, key: &Pubkey) -> (Pubkey, u8) {
-        Pubkey::find_program_address(&[&membership.to_bytes(), &key.to_bytes()], &self.program_id)
-    }
 }
 
 #[test]
 fn test_channel() {
-    let mut data: &[u8] = &[
+    let mut _data: &[u8] = &[
         0, 0, 0, 0, 5, 0, 0, 0, 116, 101, 115, 116, 50, 212, 187, 201, 36, 193, 154, 106, 252, 42,
         57, 224, 82, 49, 66, 121, 115, 239, 73, 20, 146, 111, 168, 32, 147, 213, 73, 8, 203, 3,
         111, 154, 39, 45, 27, 137, 99, 0, 0, 0, 0, 129, 30, 137, 99, 0, 0, 0, 0, 0, 1, 0, 1, 0, 0,
@@ -333,9 +276,8 @@ fn test_channel() {
         0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
     ];
 
-    let ch = Channel::deserialize(&mut data).unwrap();
-
-    println!("{:?}", ch);
+    // let ch = Channel::deserialize(&mut data).unwrap();
+    // println!("{:?}", ch);
 }
 
 #[tokio::test]

@@ -10,21 +10,21 @@ use zeroize::Zeroize;
 const XC20P_NONCE_LENGTH: usize = 24;
 const XC20P_TAG_LENGTH: usize = 16;
 
-const ED25519_PUBLIC_KEY_LEN: usize = 32;
+// const ED25519_PUBLIC_KEY_LEN: usize = 32;
 const ED25519_SECRET_KEY_LEN: usize = 32;
-const X25519_PUBLIC_KEY_LEN: usize = 32;
+// const X25519_PUBLIC_KEY_LEN: usize = 32;
 const X25519_SECRET_KEY_LEN: usize = 32;
 
 const ECDH_ES_XC20PKW_ALG: &str = "ECDH-ES+XC20PKW";
 const ECDH_ES_XC20PKW_KEYLEN: usize = 256;
 
-pub fn encrypt_cek(cek: &[u8], pubkey: &[u8; 32]) -> Result<CEKData> {
-    todo!()
-}
-
-pub fn encrypt_message<T: AsRef<[u8]>>(msg: T, cek: &[u8]) {
-    todo!()
-}
+// pub fn encrypt_cek(cek: &[u8], pubkey: &[u8; 32]) -> Result<CEKData> {
+//     todo!()
+// }
+//
+// pub fn encrypt_message<T: AsRef<[u8]>>(msg: T, cek: &[u8]) {
+//     todo!()
+// }
 
 /// Decrypt an encrypted CEK for the with the key that was used to encrypt it
 pub fn decrypt_cek(cek: CEKData, private_key: &[u8]) -> Result<Vec<u8>> {
@@ -167,7 +167,7 @@ fn concat_kdf(alg: &str, len: usize, z: &[u8], apu: &[u8], apv: &[u8]) -> Result
 #[cfg(test)]
 mod tests {
     use super::*;
-    use anchor_client::solana_sdk::signature::{Keypair, Signer};
+    use anchor_client::solana_sdk::signature::Keypair;
 
     #[test]
     fn test_decrypt_cek() {

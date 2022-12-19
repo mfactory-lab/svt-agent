@@ -22,6 +22,11 @@ impl<'a> Notifier<'a> {
         }
     }
 
+    pub fn with_webhook(&mut self, url: &'a str) -> &mut Self {
+        self.webhook_url = url;
+        self
+    }
+
     #[tracing::instrument(skip(self))]
     pub async fn notify_pre_start(&self) -> Result<()> {
         self.notify("pre_start").await
