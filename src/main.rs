@@ -17,7 +17,7 @@ use anchor_client::solana_client::rpc_config::RpcTransactionLogsFilter;
 use anchor_client::solana_sdk::pubkey::Pubkey;
 use anchor_client::solana_sdk::signature::read_keypair_file;
 use anchor_client::Cluster;
-use anyhow::Result;
+use anyhow::{Error, Result};
 use clap::Parser;
 use constants::*;
 use state::*;
@@ -25,8 +25,10 @@ use std::fmt::Debug;
 use std::path::PathBuf;
 use std::str::FromStr;
 use std::sync::Arc;
+use std::time::Duration;
 use tokio::sync::{mpsc, RwLock};
 use tokio::task::JoinHandle;
+use tokio::time;
 use tracing::{error, info, warn};
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
@@ -50,6 +52,7 @@ struct Cli {
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<()> {
+    // Initialize tracing
     Registry::default()
         .with(EnvFilter::from_default_env())
         .with(
@@ -103,18 +106,15 @@ impl Agent {
         info!("Program ID {:?}", self.program_id);
         info!("Channel ID {:?}", self.channel_id);
 
-        let cek = self.client.load_cek(&self.channel_id).await?;
-        let membership = self.client.load_membership(&self.channel_id).await?;
-
-        let initial_commands = self
-            .load_commands(cek.as_slice(), membership.last_read_message_id)
-            .await?;
-
-        info!("Added {} commands to the queue...", initial_commands.len());
-
-        for command in initial_commands {
-            self.runner.write().await.add_task(command);
-        }
+        let cek = loop {
+            match self.prepare().await {
+                Ok(cek) => break cek,
+                Err(e) => {
+                    info!("{}", e);
+                    time::sleep(Duration::from_millis(WAIT_AUTHORIZATION_INTERVAL)).await;
+                }
+            }
+        };
 
         let (sender, receiver) = mpsc::unbounded_channel::<NewMessageEvent>();
 
@@ -127,6 +127,61 @@ impl Agent {
         Ok(())
     }
 
+    /// This method try to load the [ChannelMembership] account.
+    /// If the membership doesn't exists, a `join request` will be sent.
+    /// If membership status is authorized, try to load [ChannelDevice] and return the `CEK`.
+    async fn prepare(&self) -> Result<Vec<u8>> {
+        let membership = self.client.load_membership(&self.channel_id).await;
+
+        match membership {
+            Ok(membership) => {
+                if membership.status == ChannelMembershipStatus::Authorized {
+                    let cek = self.client.load_cek(&self.channel_id).await?;
+
+                    let initial_commands = self
+                        .load_commands(cek.as_slice(), membership.last_read_message_id)
+                        .await?;
+
+                    info!(
+                        "Added {} initial commands to the queue...",
+                        initial_commands.len()
+                    );
+
+                    for command in initial_commands {
+                        self.runner.write().await.add_task(command);
+                    }
+
+                    return Ok(cek);
+                }
+                Err(Error::msg("Awaiting authorization..."))
+            }
+            Err(e) => {
+                error!("[prepare] Error: {}", e);
+                self.client.join_channel(&self.channel_id).await?;
+                Err(e)
+            }
+        }
+    }
+
+    /// Load commands from the `channel` decrypt, convert to the [Task] and filter by `id_from`.
+    #[tracing::instrument(skip(self, cek))]
+    async fn load_commands(&self, cek: &[u8], id_from: u64) -> Result<Vec<Task>> {
+        info!("Loading channel...");
+        let channel = self.client.load_channel(&self.channel_id).await?;
+        info!("Prepare commands...");
+        let mut commands = vec![];
+        for message in channel.messages {
+            if message.id > id_from {
+                if let Ok(cmd) = convert_message_to_task(message, cek) {
+                    commands.push(cmd);
+                }
+            }
+        }
+        Ok(commands)
+    }
+
+    /// This method waits and runs commands from the runner queue at some interval.
+    /// TODO: retry on fail, read_message on fail
     fn command_runner(&self) -> JoinHandle<()> {
         tokio::spawn({
             let runner = self.runner.clone();
@@ -139,7 +194,6 @@ impl Agent {
                         Ok(maybe_task) => {
                             if let Some(task) = maybe_task {
                                 info!("[command_runner] Confirming Task#{}...", task.id);
-
                                 match client.read_message(task.id, &channel_id).await {
                                     Ok(sig) => {
                                         info!(
@@ -148,7 +202,7 @@ impl Agent {
                                         );
                                     }
                                     Err(e) => {
-                                        error!("[command_runner] Error: {}", e);
+                                        error!("[command_runner][read_message] Error: {}", e);
                                     }
                                 }
                             }
@@ -158,13 +212,13 @@ impl Agent {
                         }
                     };
                     info!("[command_runner] Waiting a command...");
-                    tokio::time::sleep(std::time::Duration::from_millis(COMMAND_POLL_INTERVAL))
-                        .await;
+                    time::sleep(Duration::from_millis(COMMAND_POLL_INTERVAL)).await;
                 }
             }
         })
     }
 
+    /// Process [NewMessageEvent] events convert to the [Task] and add to the runner queue.
     fn command_processor(
         &self,
         mut receiver: mpsc::UnboundedReceiver<NewMessageEvent>,
@@ -187,6 +241,7 @@ impl Agent {
         })
     }
 
+    /// Listen for [NewMessageEvent] events and send them to the `sender`.
     fn command_listener(&self, sender: mpsc::UnboundedSender<NewMessageEvent>) -> JoinHandle<()> {
         tokio::spawn({
             let url = self.client.cluster.ws_url().to_owned();
@@ -226,26 +281,10 @@ impl Agent {
                         }
                     }
                     info!("[command_listener] Reconnecting...");
-                    tokio::time::sleep(std::time::Duration::from_millis(3000)).await;
+                    time::sleep(Duration::from_millis(3000)).await;
                 }
             }
         })
-    }
-
-    #[tracing::instrument(skip(self, cek))]
-    async fn load_commands(&self, cek: &[u8], id_from: u64) -> Result<Vec<Task>> {
-        info!("Loading channel...");
-        let channel = self.client.load_channel(&self.channel_id).await?;
-        info!("Prepare commands...");
-        let mut commands = vec![];
-        for message in channel.messages {
-            if message.id > id_from {
-                if let Ok(cmd) = convert_message_to_task(message, cek) {
-                    commands.push(cmd);
-                }
-            }
-        }
-        Ok(commands)
     }
 }
 
