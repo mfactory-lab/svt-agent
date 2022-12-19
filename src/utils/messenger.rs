@@ -13,7 +13,7 @@ use anchor_lang::prelude::*;
 use anyhow::Result;
 use tracing::info;
 
-const AGENT_NAME: &[u8] = b"agent";
+const AGENT_NAME: &str = "agent";
 
 pub struct MessengerClient {
     pub program_id: Pubkey,
@@ -53,12 +53,23 @@ impl MessengerClient {
             AccountMeta::new_readonly(system_program::id(), false),
         ];
 
-        let discriminator: &[u8] = &[124, 39, 115, 89, 217, 26, 38, 29];
+        let mut data = vec![
+            // discriminator
+            124, 39, 115, 89, 217, 26, 38, 29,
+        ];
+
+        JoinChannelData::serialize(
+            &JoinChannelData {
+                name: AGENT_NAME.to_string(),
+                authority: None,
+            },
+            &mut data,
+        )?;
 
         let message = Message::new(
             &[Instruction::new_with_bytes(
                 self.program_id,
-                &[discriminator, AGENT_NAME].concat(),
+                data.as_slice(),
                 account_metas,
             )],
             Some(&authority),
@@ -160,4 +171,10 @@ impl MessengerClient {
 
         Ok(sig)
     }
+}
+
+#[derive(AnchorSerialize, AnchorDeserialize, Clone)]
+pub struct JoinChannelData {
+    pub name: String,
+    pub authority: Option<Pubkey>,
 }
