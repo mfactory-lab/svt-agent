@@ -3,10 +3,11 @@ pub mod messenger;
 use crate::constants::COMMAND_DELIMITER;
 use crate::encryption::decrypt_message;
 use crate::runner::Task;
+use crate::state::Message;
 use anyhow::Error;
 use anyhow::Result;
 
-pub fn convert_message_to_task(msg: crate::state::Message, cek: &[u8]) -> Result<Task> {
+pub fn convert_message_to_task(msg: Message, cek: &[u8]) -> Result<Task> {
     let cmd = String::from_utf8(decrypt_message(msg.content, cek)?)?;
     let parts = cmd.split(COMMAND_DELIMITER).collect::<Vec<_>>();
 

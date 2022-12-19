@@ -135,26 +135,38 @@ impl TaskRunner {
 
     #[tracing::instrument(skip(self))]
     fn run_task(&self, task: &Task) -> Result<Child> {
-        // let mut cmd = Command::new("docker");
-        // cmd.args([
-        //     "run",
-        //     "-v",
-        //     &format!("{}/playbooks:/work:ro", self.home_path.to_str().unwrap()),
-        //     // "-v ~/.ansible/roles:/root/.ansible/roles",
-        //     // "-v ~/.ssh:/root/.ssh:ro",
-        //     "--rm",
-        //     "--name",
-        //     &self.container_name,
-        //     "spy86/ansible:latest",
-        // ]);
-
-        let mut cmd = Command::new("ansible-playbook");
+        let mut cmd = Command::new("docker");
         cmd.args([
+            "run",
+            "-v",
+            &format!("{}/playbooks:/work:ro", self.home_path.to_str().unwrap()),
+            // "-v ~/.ansible/roles:/root/.ansible/roles",
+            // "-v ~/.ssh:/root/.ssh:ro",
+            "--rm",
+            "--name",
+            &self.container_name,
+            "spy86/ansible:latest",
+        ]);
+        cmd.args([
+            "ansible-playbook",
             &format!("{}.yml", task.playbook),
             "-i 127.0.0.1,",
             "--connection=local",
             // "-vvv",
         ]);
+
+        // TODO: implement without docker if needed
+        // let mut cmd = Command::new("ansible-playbook");
+        // cmd.args([
+        //     &format!(
+        //         "{}/playbooks/{}.yml",
+        //         self.home_path.to_str().unwrap(),
+        //         task.playbook
+        //     ),
+        //     "-i 127.0.0.1,",
+        //     "--connection=local",
+        //     // "-vvv",
+        // ]);
 
         if !task.extra_vars.is_empty() {
             cmd.args(["-e", &task.extra_vars]);
