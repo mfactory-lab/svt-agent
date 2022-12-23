@@ -52,7 +52,7 @@ impl<'a> Listener<'a> {
         }
 
         info!("[Listener] Unsubscribing...");
-        FnOnce::call_once(unsubscribe, ());
+        // FnOnce::call_once(unsubscribe, ());
 
         Ok(())
     }
