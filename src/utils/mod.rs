@@ -1,4 +1,4 @@
-pub mod messenger;
+pub mod messenger_client;
 
 use crate::constants::COMMAND_DELIMITER;
 use crate::encryption::decrypt_message;
