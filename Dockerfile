@@ -11,24 +11,15 @@ COPY --from=planner /app/recipe.json recipe.json
 RUN cargo chef cook --release --recipe-path recipe.json
 # Build application
 COPY . .
-RUN cargo build --release --bin app
+RUN cargo build --release
 
-FROM debian:buster-slim AS runtime
-#FROM gcr.io/distroless/cc-debian10
-
-COPY --from=builder /app/target/release/app /usr/local/bin
-COPY --from=builder /app/playbooks /app/playbooks
-
-RUN apt-get update \
-  && apt-get install -y --no-install-recommends \
-    curl \
-    ca-certificates \
-  && apt-get -y clean \
-  && rm -rf /var/lib/apt/lists/*
-RUN curl -fsSL https://get.docker.com/ | sh
-
-ENV RUST_LOG=info
+FROM gcr.io/distroless/cc AS runtime
 
 WORKDIR app
+
+COPY --from=builder /app/target/release/svt-agent /usr/local/bin/app
+COPY ./playbooks ./playbooks
+
+ENV RUST_LOG=info
 
 ENTRYPOINT ["/usr/local/bin/app"]
