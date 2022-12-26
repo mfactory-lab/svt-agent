@@ -1,5 +1,3 @@
-#![feature(fn_traits)]
-
 mod constants;
 mod encryption;
 mod listener;
@@ -11,7 +9,7 @@ mod utils;
 
 use crate::listener::Listener;
 use crate::runner::{Task, TaskRunner};
-use crate::utils::{convert_message_to_task, messenger::MessengerClient};
+use crate::utils::{convert_message_to_task, MessengerClient};
 use anchor_client::solana_client::nonblocking::pubsub_client::PubsubClient;
 use anchor_client::solana_client::rpc_config::RpcTransactionLogsFilter;
 use anchor_client::solana_sdk::pubkey::Pubkey;
@@ -48,6 +46,8 @@ struct Cli {
     channel_id: String,
     #[arg(short, long, value_name = "MESSENGER_PROGRAM", default_value = MESSENGER_PROGRAM_ID)]
     messenger_program_id: String,
+    #[arg(short, long, value_name = "PLAYBOOKS_PATH")]
+    playbooks_path: Option<PathBuf>,
 }
 
 #[tokio::main(flavor = "current_thread")]
@@ -90,13 +90,18 @@ impl Agent {
         let program_id = Pubkey::from_str(&cli.messenger_program_id)?;
         let channel_id = Pubkey::from_str(&cli.channel_id)?;
 
-        let runner = Arc::new(RwLock::new(TaskRunner::new()));
+        let mut runner = TaskRunner::new();
+
+        if let Some(playbooks_path) = cli.playbooks_path {
+            runner.with_playbook_path(playbooks_path);
+        }
+
         let client = Arc::new(MessengerClient::new(cli.cluster, program_id, keypair));
 
         Ok(Self {
             program_id,
             channel_id,
-            runner,
+            runner: Arc::new(RwLock::new(runner)),
             client,
         })
     }
@@ -110,7 +115,7 @@ impl Agent {
             match self.prepare().await {
                 Ok(cek) => break cek,
                 Err(e) => {
-                    info!("{}", e);
+                    warn!("Error: {}", e);
                     time::sleep(Duration::from_millis(WAIT_AUTHORIZATION_INTERVAL)).await;
                 }
             }
@@ -163,7 +168,8 @@ impl Agent {
         }
     }
 
-    /// Load commands from the `channel` decrypt, convert to the [Task] and filter by `id_from`.
+    /// Load commands from the `channel` account.
+    /// Decrypt, convert to the [Task] and filter by `id_from`.
     #[tracing::instrument(skip(self, cek))]
     async fn load_commands(&self, cek: &[u8], id_from: u64) -> Result<Vec<Task>> {
         info!("Loading channel...");
@@ -194,17 +200,17 @@ impl Agent {
                         Ok(maybe_task) => {
                             if let Some(task) = maybe_task {
                                 info!("[command_runner] Confirming Task#{}...", task.id);
-                                match client.read_message(task.id, &channel_id).await {
-                                    Ok(sig) => {
-                                        info!(
-                                            "[command_runner] Confirmed Task#{}! Signature: {}",
-                                            task.id, sig
-                                        );
-                                    }
-                                    Err(e) => {
-                                        error!("[command_runner][read_message] Error: {}", e);
-                                    }
-                                }
+                                // match client.read_message(task.id, &channel_id).await {
+                                //     Ok(sig) => {
+                                //         info!(
+                                //             "[command_runner] Confirmed Task#{}! Signature: {}",
+                                //             task.id, sig
+                                //         );
+                                //     }
+                                //     Err(e) => {
+                                //         error!("[command_runner][read_message] Error: {}", e);
+                                //     }
+                                // }
                             }
                         }
                         Err(e) => {
@@ -288,39 +294,8 @@ impl Agent {
     }
 }
 
-#[test]
-fn test_channel() {
-    let mut _data: &[u8] = &[
-        0, 0, 0, 0, 5, 0, 0, 0, 116, 101, 115, 116, 50, 212, 187, 201, 36, 193, 154, 106, 252, 42,
-        57, 224, 82, 49, 66, 121, 115, 239, 73, 20, 146, 111, 168, 32, 147, 213, 73, 8, 203, 3,
-        111, 154, 39, 45, 27, 137, 99, 0, 0, 0, 0, 129, 30, 137, 99, 0, 0, 0, 0, 0, 1, 0, 1, 0, 0,
-        0, 0, 0, 0, 0, 1, 0, 1, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 212, 187, 201, 36, 193, 154, 106,
-        252, 42, 57, 224, 82, 49, 66, 121, 115, 239, 73, 20, 146, 111, 168, 32, 147, 213, 73, 8,
-        203, 3, 111, 154, 39, 129, 30, 137, 99, 0, 0, 0, 0, 1, 60, 0, 0, 0, 48, 54, 114, 84, 69,
-        79, 99, 102, 121, 48, 72, 86, 99, 83, 71, 119, 47, 105, 73, 86, 116, 75, 47, 88, 67, 69,
-        49, 71, 115, 87, 118, 107, 56, 103, 98, 87, 78, 99, 84, 88, 109, 117, 113, 119, 50, 109,
-        67, 55, 74, 55, 68, 103, 101, 100, 55, 107, 107, 119, 61, 61, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-    ];
-
-    // let ch = Channel::deserialize(&mut data).unwrap();
-    // println!("{:?}", ch);
-}
-
 #[tokio::test]
-async fn test() {
+async fn test_agent_init() {
     let keypair = PathBuf::from("./keypair.json");
 
     let agent = Agent::new(Cli {
@@ -328,6 +303,7 @@ async fn test() {
         cluster: Cluster::Devnet,
         channel_id: DEFAULT_CHANNEL_ID.to_string(),
         messenger_program_id: MESSENGER_PROGRAM_ID.to_string(),
+        playbooks_path: None,
     })
     .unwrap();
 

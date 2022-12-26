@@ -1,16 +1,17 @@
-use crate::monitor::TaskMonitor;
+use crate::monitor::{TaskMonitor, TaskMonitorOptions};
 use crate::notifier::Notifier;
-use anyhow::{Context, Error, Result};
+use anyhow::{Error, Result};
+use futures::StreamExt;
+use shiplift::tty::TtyChunk;
+use shiplift::{Container, ContainerOptions, Docker, LogsOptions};
 use std::collections::VecDeque;
 use std::path::PathBuf;
-use std::process::Stdio;
 use std::time::Duration;
-use tokio::process::Child;
-use tokio::process::Command;
 use tokio::time;
 use tracing::error;
 use tracing::info;
 
+const ANSIBLE_IMAGE: &str = "spy86/ansible:latest";
 /// Used to filter containers by the monitor instance
 const TASK_CONTAINER_NAME: &str = "svt-agent-task";
 /// Prevent starting the monitoring when commands executes immediately
@@ -32,7 +33,8 @@ pub struct Task {
 pub struct TaskRunner {
     /// The [Task] queue
     queue: VecDeque<Task>,
-    home_path: PathBuf,
+    docker: Docker,
+    playbook_path: PathBuf,
     monitor_port: u16,
     monitor_start_timeout_ms: u64,
     container_name: String,
@@ -42,16 +44,16 @@ impl TaskRunner {
     pub fn new() -> Self {
         Self {
             queue: VecDeque::new(),
-            // TODO: fixme
-            home_path: PathBuf::from("/Users/tiamo/IdeaProjects/svt-agent"),
+            docker: Docker::new(),
+            playbook_path: PathBuf::from("/app/playbooks"),
             monitor_start_timeout_ms: MONITOR_START_TIMEOUT_MS,
             monitor_port: MONITOR_DEFAULT_PORT,
             container_name: TASK_CONTAINER_NAME.to_string(),
         }
     }
 
-    pub fn with_home_path(&mut self, path: PathBuf) -> &mut Self {
-        self.home_path = path;
+    pub fn with_playbook_path(&mut self, path: PathBuf) -> &mut Self {
+        self.playbook_path = path;
         self
     }
 
@@ -65,38 +67,31 @@ impl TaskRunner {
     pub async fn run(&mut self) -> Result<Option<Task>> {
         if let Some(task) = self.queue.pop_front() {
             let mut notifier = Notifier::new(&task);
-            notifier.notify_pre_start().await;
-
             let mut _err: Option<Error> = None;
             let mut is_success = false;
 
-            match self.run_task(&task) {
-                Ok(child) => {
+            match self.run_task(&task).await {
+                Ok(container) => {
                     notifier.notify_start().await;
 
-                    let mut monitor =
-                        TaskMonitor::new(self.monitor_port, &self.container_name, Some(&task.uuid));
+                    let mut opts = TaskMonitorOptions::new();
+                    opts.filter(&self.container_name);
+                    opts.port(self.monitor_port);
+                    opts.password(&task.uuid);
+
+                    let mut monitor = TaskMonitor::new(&opts, &self.docker);
 
                     let monitor_start_timeout =
                         time::sleep(Duration::from_millis(self.monitor_start_timeout_ms));
                     tokio::pin!(monitor_start_timeout);
 
-                    let mut join_handle = tokio::spawn(async move {
-                        // time::sleep(Duration::from_millis(7000)).await;
-                        child.wait_with_output().await
-                    });
-
                     loop {
                         tokio::select! {
-                            join_res = &mut join_handle => {
-                                match join_res {
-                                    Ok(res) => match res {
-                                        Ok(output) => {
-                                            is_success = output.status.success();
-                                            notifier.notify_finish(output).await;
-                                            // eprintln!("output: {:?}", output)
-                                        }
-                                        Err(e) => _err = Some(Error::from(e))
+                            res = container.wait() => {
+                                match res {
+                                    Ok(exit) => {
+                                        info!("Task finished...");
+                                        is_success = exit.status_code == 0;
                                     },
                                     Err(e) => _err = Some(Error::from(e))
                                 }
@@ -104,12 +99,22 @@ impl TaskRunner {
                             }
                             _ = &mut monitor_start_timeout, if !monitor_start_timeout.is_elapsed() => {
                                 info!("Starting monitor...");
-                                if let Err(e) = monitor.start() {
+                                if let Err(e) = monitor.start().await {
                                     error!("Failed to start monitor. {}", e);
                                 }
                             }
                             else => { break }
                         }
+                    }
+
+                    if is_success {
+                        let output = get_container_logs(&container).await;
+                        // println!("output: {:?}", output);
+                        notifier.notify_finish(output).await;
+                    }
+
+                    if let Err(e) = container.delete().await {
+                        error!("Failed to delete task container. {}", e);
                     }
 
                     if let Err(e) = monitor.stop().await {
@@ -118,6 +123,7 @@ impl TaskRunner {
                 }
                 Err(e) => {
                     info!("Failed to run command");
+                    println!("{:?}", e);
                     _err = Some(e);
                 }
             }
@@ -135,55 +141,115 @@ impl TaskRunner {
     }
 
     #[tracing::instrument(skip(self))]
-    fn run_task(&self, task: &Task) -> Result<Child> {
-        let mut cmd = Command::new("docker");
-        cmd.args([
-            "run",
-            "-v",
-            &format!("{}/playbooks:/work:ro", self.home_path.to_str().unwrap()),
-            // "-v ~/.ansible/roles:/root/.ansible/roles",
-            // "-v ~/.ssh:/root/.ssh:ro",
-            "--rm",
-            "--name",
-            &self.container_name,
-            "spy86/ansible:latest",
-        ]);
-        cmd.args([
-            "ansible-playbook",
-            &format!("{}.yml", task.playbook),
-            "-i 127.0.0.1,",
-            "--connection=local",
-            // "-vvv",
-        ]);
-
-        // TODO: implement without docker if needed
-        // let mut cmd = Command::new("ansible-playbook");
-        // cmd.args([
-        //     &format!(
-        //         "{}/playbooks/{}.yml",
-        //         self.home_path.to_str().unwrap(),
-        //         task.playbook
-        //     ),
-        //     "-i 127.0.0.1,",
-        //     "--connection=local",
-        //     // "-vvv",
-        // ]);
-
-        if !task.extra_vars.is_empty() {
-            cmd.args(["-e", &task.extra_vars]);
+    async fn run_task(&self, task: &Task) -> Result<Container> {
+        if !self.playbook_path.is_dir() {
+            return Err(Error::msg(format!(
+                "Playbooks path `{}` is invalid...",
+                self.playbook_path.to_str().unwrap()
+            )));
         }
 
-        info!("Executing... {:?}", cmd.as_std());
+        let options = ContainerOptions::builder(ANSIBLE_IMAGE)
+            .name(&self.container_name)
+            .volumes(vec![
+                &format!("{}:/work:ro", self.playbook_path.to_str().unwrap()),
+                // "~/.ansible/roles:/root/.ansible/roles",
+                // "~/.ssh:/root/.ssh:ro",
+            ])
+            .cmd(vec![
+                "ansible-playbook",
+                &format!("{}.yml", task.playbook),
+                &format!("-e {}", task.extra_vars),
+                "-i 127.0.0.1,",
+                "--connection=local",
+                "-vvv",
+            ])
+            // can't get container logs with auto_remove = true
+            // .auto_remove(true)
+            .build();
 
-        cmd.stdout(Stdio::piped());
-        cmd.stderr(Stdio::piped());
-        cmd.kill_on_drop(true);
-        cmd.spawn().context("Running task")
+        // Delete if exists
+        if let Err(_e) = self
+            .docker
+            .containers()
+            .get(&self.container_name)
+            .delete()
+            .await
+        {
+            // error!("Error: {}", e)
+            // container is not exists...
+        }
+
+        let info = self.docker.containers().create(&options).await?;
+        let container = self.docker.containers().get(&info.id);
+        info!("Container Id:{:?}", container.id());
+
+        if let Err(e) = container.start().await {
+            // automatic delete container if is failed
+            container.delete().await?;
+            error!("Error: {:?}", e);
+            return Err(Error::from(e));
+        }
+
+        Ok(container)
     }
 
     /// Add new [task] to the [queue]
     pub fn add_task(&mut self, task: Task) -> &mut Self {
         self.queue.push_back(task);
         self
+    }
+}
+
+/// Try to get the [container] output
+#[tracing::instrument(skip(container))]
+async fn get_container_logs(container: &Container<'_>) -> String {
+    let mut res = String::new();
+    let mut logs_stream = container.logs(&LogsOptions::builder().stdout(true).stderr(true).build());
+
+    while let Some(log_result) = logs_stream.next().await {
+        match log_result {
+            Ok(chunk) => {
+                if let TtyChunk::StdOut(bytes) = chunk {
+                    res.push_str(std::str::from_utf8(&bytes).unwrap());
+                }
+            }
+            Err(e) => error!("Error: {}", e),
+        }
+    }
+
+    res
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::env;
+    use tracing_test::traced_test;
+
+    #[tokio::test]
+    #[traced_test]
+    async fn test_runner() {
+        let mut playbooks = env::current_dir().unwrap();
+        playbooks.push("playbooks");
+
+        let mut runner = TaskRunner::new();
+        runner.with_playbook_path(playbooks);
+
+        let task = Task {
+            id: 0,
+            uuid: "".to_string(),
+            playbook: "test".to_string(),
+            extra_vars: "sleep=10".to_string(),
+        };
+
+        runner.add_task(task);
+
+        assert_eq!(runner.queue.len(), 1);
+
+        // let res = runner.run_task(&task).await;
+
+        let res = runner.run().await;
+        println!("{:?}", res);
     }
 }

@@ -2,14 +2,13 @@ use crate::runner::Task;
 use anyhow::Error;
 use anyhow::Result;
 use serde_json::json;
-use std::process::Output;
 use tracing::info;
 
 pub struct Notifier<'a> {
     task: &'a Task,
     webhook_url: &'a str,
     error: Option<&'a Error>,
-    output: Option<Output>,
+    output: String,
 }
 
 impl<'a> Notifier<'a> {
@@ -18,7 +17,7 @@ impl<'a> Notifier<'a> {
             task,
             webhook_url: "",
             error: None,
-            output: None,
+            output: "".to_string(),
         }
     }
 
@@ -28,18 +27,13 @@ impl<'a> Notifier<'a> {
     }
 
     #[tracing::instrument(skip(self))]
-    pub async fn notify_pre_start(&self) -> Result<()> {
-        self.notify("pre_start").await
-    }
-
-    #[tracing::instrument(skip(self))]
     pub async fn notify_start(&self) -> Result<()> {
         self.notify("start").await
     }
 
     #[tracing::instrument(skip(self))]
-    pub async fn notify_finish(&mut self, output: Output) -> Result<()> {
-        self.output = Some(output);
+    pub async fn notify_finish(&mut self, output: String) -> Result<()> {
+        self.output = output;
         self.notify("finish").await
     }
 
@@ -57,18 +51,12 @@ impl<'a> Notifier<'a> {
         if !self.webhook_url.is_empty() {
             let client = hyper::Client::new();
 
-            let status = self.output.as_ref().map(|s| s.status.to_string());
             let error = self.error.map(|e| e.to_string());
-            let stdout = self
-                .output
-                .as_ref()
-                .map(|s| String::from_utf8(s.stdout.clone()).unwrap());
 
             let data = json!({
                 "task": self.task.id,
                 "event": event,
-                "status": status,
-                "stdout": stdout,
+                "output": self.output,
                 "error": error,
             });
 
@@ -84,6 +72,7 @@ impl<'a> Notifier<'a> {
 
             info!("[Webhook] Response: {:?}", resp);
         }
+
         Ok(())
     }
 }

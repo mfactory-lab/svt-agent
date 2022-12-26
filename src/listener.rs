@@ -11,7 +11,7 @@ use anchor_lang::Event;
 use anyhow::Result;
 use futures::StreamExt;
 use regex::Regex;
-use tracing::info;
+use tracing::{error, info};
 
 pub struct Listener<'a> {
     program_id: Pubkey,
@@ -37,7 +37,7 @@ impl<'a> Listener<'a> {
     }
 
     pub async fn on<T: Event>(&self, cb: impl Fn(T)) -> Result<()> {
-        let (mut stream, unsubscribe) = self
+        let (mut stream, _unsubscribe) = self
             .client
             .logs_subscribe(self.filter.clone(), self.config.clone())
             .await?;
@@ -46,12 +46,12 @@ impl<'a> Listener<'a> {
             match self.handle_event::<T>(&log, &cb) {
                 Ok(_) => {}
                 Err(e) => {
-                    info!("[Listener] Error: {}", e);
+                    error!("Error: {}", e);
                 }
             }
         }
 
-        info!("[Listener] Unsubscribing...");
+        info!("Unsubscribing...");
         // FnOnce::call_once(unsubscribe, ());
 
         Ok(())

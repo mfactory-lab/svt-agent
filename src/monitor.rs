@@ -1,77 +1,132 @@
-use anyhow::Context;
-use std::process::Stdio;
-use tokio::process::{Child, Command};
+use shiplift::{Container, ContainerOptions, Docker};
 use tracing::info;
 
 ///
 /// Think about web endpoint with `docker logs` output
 ///
 
+const MONITOR_IMAGE: &str = "amir20/dozzle:latest";
 const DEFAULT_USERNAME: &str = "admin";
+const DEFAULT_HOST_PORT: u16 = 8888;
+const CONTAINER_NAME: &str = "svt-agent-monitor";
 
-pub struct TaskMonitor<'a> {
+#[derive(Default)]
+pub struct TaskMonitorOptions<'a> {
     port: u16,
     username: &'a str,
-    password: Option<&'a str>,
+    password: &'a str,
     filter: &'a str,
-    process: Option<Child>,
 }
 
-impl<'a> TaskMonitor<'a> {
-    pub fn new(port: u16, filter: &'a str, password: Option<&'a str>) -> Self {
+impl<'a> TaskMonitorOptions<'a> {
+    pub fn new() -> Self {
         Self {
-            port,
-            filter,
-            password,
+            filter: "",
+            password: "",
             username: DEFAULT_USERNAME,
-            process: None,
+            port: DEFAULT_HOST_PORT,
+        }
+    }
+
+    pub fn port(&mut self, port: u16) -> &mut Self {
+        self.port = port;
+        self
+    }
+
+    pub fn password(&mut self, password: &'a str) -> &mut Self {
+        self.password = password;
+        self
+    }
+
+    pub fn filter(&mut self, filter: &'a str) -> &mut Self {
+        self.filter = filter;
+        self
+    }
+
+    pub fn build(&self) -> &Self {
+        self
+    }
+}
+
+pub struct TaskMonitor<'a, 'b> {
+    opts: &'a TaskMonitorOptions<'b>,
+    docker: &'a Docker,
+    container: Option<Container<'a>>,
+}
+
+impl<'a, 'b> TaskMonitor<'a, 'b> {
+    pub fn new(opts: &'a TaskMonitorOptions<'b>, docker: &'a Docker) -> Self {
+        Self {
+            opts,
+            docker,
+            container: None,
         }
     }
 
     #[tracing::instrument(skip(self))]
-    pub fn start(&mut self) -> anyhow::Result<()> {
-        let mut cmd = Command::new("docker");
+    pub async fn start(&mut self) -> anyhow::Result<()> {
+        let container = self.docker.containers().get(CONTAINER_NAME);
 
-        cmd.args([
-            "run",
-            "-v",
-            "/var/run/docker.sock:/var/run/docker.sock",
-            "-p",
-            &format!("{}:8080", self.port),
-            "--rm",
-            "amir20/dozzle:latest",
-            "--filter",
-            &format!("name={}", self.filter),
-            "--no-analytics",
-        ]);
-
-        if let Some(password) = self.password {
-            if !password.is_empty() {
-                cmd.args(["--username", self.username, "--password", password]);
-            }
+        // trying to stop and delete previously started container
+        if (container.stop(None).await).is_ok() {
+            container.delete().await?;
+            info!("Deleted existing container...");
         }
 
-        cmd.stdout(Stdio::null());
-        cmd.stderr(Stdio::null());
-        cmd.kill_on_drop(true);
+        let options = ContainerOptions::builder(MONITOR_IMAGE)
+            .name(CONTAINER_NAME)
+            .volumes(vec!["/var/run/docker.sock:/var/run/docker.sock"])
+            .expose(8080, "tcp", self.opts.port as u32)
+            .auto_remove(true)
+            .env([
+                "DOZZLE_NO_ANALYTICS=true",
+                &format!(
+                    "DOZZLE_USERNAME={}",
+                    if !self.opts.password.is_empty() {
+                        self.opts.username
+                    } else {
+                        ""
+                    }
+                ),
+                &format!("DOZZLE_PASSWORD={}", self.opts.password),
+                &format!("DOZZLE_FILTER=name={}", self.opts.filter),
+            ])
+            .build();
 
-        self.process = Some(cmd.spawn().context("TaskMonitor")?);
+        let info = self.docker.containers().create(&options).await?;
+        info!("Monitor container was created ({:?})", info);
+
+        let container = self.docker.containers().get(&info.id);
+        container.start().await?;
+        info!("Monitor was started...");
+
+        self.container = Some(container);
 
         Ok(())
     }
 
     #[tracing::instrument(skip(self))]
-    pub async fn stop(&mut self) -> std::io::Result<()> {
-        if let Some(child) = &mut self.process {
-            Command::new("kill")
-                .args(["-s", "TERM", &child.id().unwrap().to_string()])
-                .spawn()?
-                .wait()
-                .await?;
-            // TODO: `child.kill` doesnt work
-            // return child.kill().await;
+    pub async fn stop(&mut self) -> anyhow::Result<()> {
+        if let Some(container) = &self.container {
+            info!("Stopping monitoring...");
+            container.stop(None).await?;
+            self.container = None;
+        } else {
+            info!("Monitor is not started...");
         }
-        info!("Monitor is not started...");
         Ok(())
     }
+}
+
+#[tokio::test]
+async fn test_monitor() {
+    let docker = Docker::new();
+
+    let mut opts = TaskMonitorOptions::new();
+    opts.filter("monitor");
+    opts.password("admin");
+
+    let mut monitor = TaskMonitor::new(opts.build(), &docker);
+
+    monitor.start().await;
 }
