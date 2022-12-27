@@ -17,7 +17,8 @@ const ANSIBLE_IMAGE: &str = "willhallonline/ansible:alpine";
 const TASK_CONTAINER_NAME: &str = "svt-agent-task";
 /// Prevent starting the monitoring when commands executes immediately
 const MONITOR_START_TIMEOUT_MS: u64 = 2000;
-const MONITOR_DEFAULT_PORT: u16 = 8888;
+const DEFAULT_MONITOR_PORT: u16 = 8888;
+const DEFAULT_WORKING_DIR: &str = "/app";
 
 #[derive(Debug)]
 pub struct Task {
@@ -46,9 +47,9 @@ impl TaskRunner {
         Self {
             queue: VecDeque::new(),
             docker: Docker::new(),
-            working_dir: PathBuf::from("/app"),
+            working_dir: PathBuf::from(DEFAULT_WORKING_DIR),
             monitor_start_timeout_ms: MONITOR_START_TIMEOUT_MS,
-            monitor_port: MONITOR_DEFAULT_PORT,
+            monitor_port: DEFAULT_MONITOR_PORT,
             container_name: TASK_CONTAINER_NAME.to_string(),
         }
     }
@@ -87,6 +88,7 @@ impl TaskRunner {
             )));
         }
 
+        // download ansible image first
         let mut stream = self
             .docker
             .images()
@@ -112,8 +114,8 @@ impl TaskRunner {
 
         if let Some(task) = self.queue.pop_front() {
             let mut notifier = Notifier::new(&task);
-            let mut _err: Option<Error> = None;
-            let mut is_success = false;
+            let mut notify_error: Option<Error> = None;
+            let mut status_code: Option<u64> = None;
 
             match self.run_task(&task).await {
                 Ok(container) => {
@@ -135,10 +137,10 @@ impl TaskRunner {
                             res = container.wait() => {
                                 match res {
                                     Ok(exit) => {
-                                        is_success = exit.status_code == 0;
+                                        status_code = Some(exit.status_code);
                                         info!("Task finished (status code: {})...", exit.status_code);
                                     },
-                                    Err(e) => _err = Some(Error::from(e))
+                                    Err(e) => notify_error = Some(Error::from(e))
                                 }
                                 break;
                             }
@@ -152,11 +154,17 @@ impl TaskRunner {
                         }
                     }
 
-                    // TODO: handle stderr
-                    if is_success {
-                        let output = get_container_logs(&container).await;
-                        // println!("output: {:?}", output);
-                        let _ = notifier.notify_finish(output).await;
+                    if let Some(status_code) = status_code {
+                        let output = get_container_logs(
+                            &container,
+                            match status_code {
+                                0 => ContainerLogFlags::STD_OUT,
+                                1 => ContainerLogFlags::STD_ERR,
+                                _ => ContainerLogFlags::ALL,
+                            },
+                        )
+                        .await;
+                        let _ = notifier.notify_finish(status_code, output).await;
                     }
 
                     // if let Err(e) = container.delete().await {
@@ -170,17 +178,17 @@ impl TaskRunner {
                     }
                 }
                 Err(e) => {
-                    error!("Failed to run command. {:?}", e);
-                    _err = Some(e);
+                    error!("Failed to run task. {:?}", e);
+                    notify_error = Some(e);
                 }
             }
 
-            if let Some(e) = _err {
+            if let Some(e) = notify_error {
                 let _ = notifier.notify_error(&e).await;
                 return Err(e);
             }
 
-            if is_success {
+            if status_code.is_some() {
                 return Ok(Some(task));
             }
         }
@@ -189,27 +197,6 @@ impl TaskRunner {
 
     #[tracing::instrument(skip(self))]
     async fn run_task(&self, task: &Task) -> Result<Container> {
-        let options = ContainerOptions::builder(ANSIBLE_IMAGE)
-            .name(&self.container_name)
-            .volumes(vec![
-                &format!("{}:/ansible:ro", self.working_dir.to_str().unwrap()),
-                // "~/.ansible/roles:/root/.ansible/roles",
-                // "~/.ssh:/root/.ssh:ro",
-                // "~/.ssh/id_rsa:/root/id_rsa",
-            ])
-            .cmd(vec![
-                "ansible-playbook",
-                &format!("./playbooks/{}.yml", task.playbook),
-                &format!("-e {}", task.extra_vars),
-                "-i 127.0.0.1,",
-                "--connection=local",
-                // "-vvv",
-            ])
-            // can't get container logs with auto_remove = true
-            // .auto_remove(true)
-            .tty(true)
-            .build();
-
         // Delete if exists
         if let Err(_e) = self
             .docker
@@ -222,11 +209,35 @@ impl TaskRunner {
             // container is not exists...
         }
 
+        let options = ContainerOptions::builder(ANSIBLE_IMAGE)
+            .name(&self.container_name)
+            .network_mode("host")
+            // can't get container logs with auto_remove = true
+            // .auto_remove(true)
+            // .tty(true)
+            // .privileged(true)
+            .volumes(vec![
+                &format!("{}:/ansible:ro", self.working_dir.to_str().unwrap()),
+                // "~/.ansible/roles:/root/.ansible/roles",
+                // "~/.ssh:/root/.ssh:ro",
+                // "~/.ssh/id_rsa:/root/.ssh/id_rsa",
+            ])
+            .cmd(vec![
+                "ansible-playbook",
+                &format!("./playbooks/{}.yml", task.playbook),
+                &format!("-e {}", task.extra_vars),
+                // "-i 127.0.0.1,",
+                // "--connection=local",
+                // "-vvv",
+            ])
+            .build();
+
         info!("Creating task container... {:?}", &options);
         let info = self.docker.containers().create(&options).await?;
         let container = self.docker.containers().get(&info.id);
         info!("Container Id:{:?}", container.id());
 
+        info!("Starting task container...");
         if let Err(e) = container.start().await {
             // automatic delete container if is failed
             container.delete().await?;
@@ -238,20 +249,42 @@ impl TaskRunner {
     }
 }
 
+//noinspection RsModuleNaming
+mod ContainerLogFlags {
+    pub const STD_OUT: u8 = 0x01;
+    pub const STD_ERR: u8 = 0x02;
+    pub const ALL: u8 = 0xFF;
+}
+
 /// Try to get the [container] output
 #[tracing::instrument(skip(container))]
-async fn get_container_logs(container: &Container<'_>) -> String {
+async fn get_container_logs(container: &Container<'_>, mode: u8) -> String {
     let mut res = String::new();
-    let mut logs_stream = container.logs(&LogsOptions::builder().stdout(true).build());
+
+    let mut logs_stream = container.logs(
+        &LogsOptions::builder()
+            .timestamps(true)
+            .stdout(true)
+            .stderr(true)
+            .build(),
+    );
 
     while let Some(log_result) = logs_stream.next().await {
         match log_result {
-            Ok(chunk) => {
-                if let TtyChunk::StdOut(bytes) = chunk {
-                    res.push_str(std::str::from_utf8(&bytes).unwrap());
+            Ok(chunk) => match chunk {
+                TtyChunk::StdOut(bytes) => {
+                    if mode & ContainerLogFlags::STD_OUT == 1 {
+                        res.push_str(std::str::from_utf8(&bytes).unwrap());
+                    }
                 }
-            }
-            Err(e) => error!("Error: {}", e),
+                TtyChunk::StdErr(bytes) => {
+                    if mode & ContainerLogFlags::STD_ERR == 2 {
+                        res.push_str(std::str::from_utf8(&bytes).unwrap());
+                    }
+                }
+                _ => {}
+            },
+            Err(e) => error!("Failed to get container logs: {}", e),
         }
     }
 
@@ -268,7 +301,7 @@ mod tests {
     #[traced_test]
     async fn test_runner() {
         let mut playbooks = env::current_dir().unwrap();
-        playbooks.push("playbooks");
+        playbooks.push("ansible");
 
         let mut runner = TaskRunner::new();
         runner.with_working_dir(playbooks);
