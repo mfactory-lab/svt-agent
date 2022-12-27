@@ -2,13 +2,13 @@ use crate::runner::Task;
 use anyhow::Error;
 use anyhow::Result;
 use serde_json::json;
+use std::collections::HashMap;
 use tracing::info;
 
 pub struct Notifier<'a> {
     task: &'a Task,
     webhook_url: &'a str,
-    error: Option<&'a Error>,
-    output: String,
+    params: HashMap<&'a str, String>,
 }
 
 impl<'a> Notifier<'a> {
@@ -16,8 +16,7 @@ impl<'a> Notifier<'a> {
         Self {
             task,
             webhook_url: "",
-            error: None,
-            output: "".to_string(),
+            params: HashMap::default(),
         }
     }
 
@@ -32,14 +31,15 @@ impl<'a> Notifier<'a> {
     }
 
     #[tracing::instrument(skip(self))]
-    pub async fn notify_finish(&mut self, output: String) -> Result<()> {
-        self.output = output;
+    pub async fn notify_finish(&mut self, status_code: u64, output: String) -> Result<()> {
+        self.params.insert("status_code", status_code.to_string());
+        self.params.insert("output", output);
         self.notify("finish").await
     }
 
     #[tracing::instrument(skip(self))]
     pub async fn notify_error(&mut self, error: &'a Error) -> Result<()> {
-        self.error = Some(error);
+        self.params.insert("error", error.to_string());
         self.notify("error").await
     }
 
@@ -51,14 +51,11 @@ impl<'a> Notifier<'a> {
         if !self.webhook_url.is_empty() {
             let client = hyper::Client::new();
 
-            let error = self.error.map(|e| e.to_string());
+            let mut params = self.params.clone();
+            params.insert("task_id", self.task.id.to_string());
+            params.insert("event", event.to_string());
 
-            let data = json!({
-                "task": self.task.id,
-                "event": event,
-                "output": self.output,
-                "error": error,
-            });
+            let data = json!(params);
 
             let req = hyper::Request::builder()
                 .method(hyper::Method::POST)
