@@ -46,8 +46,8 @@ struct Cli {
     channel_id: String,
     #[arg(short, long, value_name = "MESSENGER_PROGRAM", default_value = MESSENGER_PROGRAM_ID)]
     messenger_program_id: String,
-    #[arg(short, long, value_name = "PLAYBOOKS_PATH")]
-    playbooks_path: Option<PathBuf>,
+    #[arg(short, long, value_name = "WORKING_DIR")]
+    working_dir: Option<PathBuf>,
 }
 
 #[tokio::main(flavor = "current_thread")]
@@ -92,8 +92,8 @@ impl Agent {
 
         let mut runner = TaskRunner::new();
 
-        if let Some(playbooks_path) = cli.playbooks_path {
-            runner.with_playbook_path(playbooks_path);
+        if let Some(working_dir) = cli.working_dir {
+            runner.with_working_dir(working_dir);
         }
 
         let client = Arc::new(MessengerClient::new(cli.cluster, program_id, keypair));
@@ -111,6 +111,8 @@ impl Agent {
         info!("Program ID {:?}", self.program_id);
         info!("Channel ID {:?}", self.channel_id);
 
+        self.runner.read().await.prepare().await?;
+
         let cek = loop {
             match self.prepare().await {
                 Ok(cek) => break cek,
@@ -121,6 +123,7 @@ impl Agent {
             }
         };
 
+        // The channel than handle `NewMessageEvent` events
         let (sender, receiver) = mpsc::unbounded_channel::<NewMessageEvent>();
 
         let (_, _, _) = tokio::join!(
@@ -135,6 +138,7 @@ impl Agent {
     /// This method try to load the [ChannelMembership] account.
     /// If the membership doesn't exists, a `join request` will be sent.
     /// If membership status is authorized, try to load [ChannelDevice] and return the `CEK`.
+    #[tracing::instrument(skip(self))]
     async fn prepare(&self) -> Result<Vec<u8>> {
         let membership = self.client.load_membership(&self.channel_id).await;
 
@@ -161,7 +165,7 @@ impl Agent {
                 Err(Error::msg("Awaiting authorization..."))
             }
             Err(e) => {
-                error!("[prepare] Error: {}", e);
+                error!("Error: {}", e);
                 self.client.join_channel(&self.channel_id).await?;
                 Err(e)
             }
@@ -303,7 +307,7 @@ async fn test_agent_init() {
         cluster: Cluster::Devnet,
         channel_id: DEFAULT_CHANNEL_ID.to_string(),
         messenger_program_id: MESSENGER_PROGRAM_ID.to_string(),
-        playbooks_path: None,
+        working_dir: None,
     })
     .unwrap();
 

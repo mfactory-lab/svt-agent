@@ -21,7 +21,7 @@ impl<'a> Notifier<'a> {
         }
     }
 
-    pub fn with_webhook(&mut self, url: &'a str) -> &mut Self {
+    pub fn with_webhook(mut self, url: &'a str) -> Self {
         self.webhook_url = url;
         self
     }

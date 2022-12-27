@@ -13,8 +13,12 @@ use futures::StreamExt;
 use regex::Regex;
 use tracing::{error, info};
 
+/// Listen to events in the blockchain through program logs
+/// The event is the serialized data in the "Program data:" section.
 pub struct Listener<'a> {
+    /// The program ID that should be listened
     program_id: Pubkey,
+    /// Nonblocking Solana pub/sub client
     client: &'a PubsubClient,
     filter: &'a RpcTransactionLogsFilter,
     config: RpcTransactionLogsConfig,

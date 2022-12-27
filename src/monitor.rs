@@ -28,22 +28,18 @@ impl<'a> TaskMonitorOptions<'a> {
         }
     }
 
-    pub fn port(&mut self, port: u16) -> &mut Self {
+    pub fn port(mut self, port: u16) -> Self {
         self.port = port;
         self
     }
 
-    pub fn password(&mut self, password: &'a str) -> &mut Self {
+    pub fn password(mut self, password: &'a str) -> Self {
         self.password = password;
         self
     }
 
-    pub fn filter(&mut self, filter: &'a str) -> &mut Self {
+    pub fn filter(mut self, filter: &'a str) -> Self {
         self.filter = filter;
-        self
-    }
-
-    pub fn build(&self) -> &Self {
         self
     }
 }
@@ -116,17 +112,21 @@ impl<'a, 'b> TaskMonitor<'a, 'b> {
         }
         Ok(())
     }
+
+    pub fn is_started(&self) -> bool {
+        self.container.is_some()
+    }
 }
 
 #[tokio::test]
 async fn test_monitor() {
     let docker = Docker::new();
 
-    let mut opts = TaskMonitorOptions::new();
-    opts.filter("monitor");
-    opts.password("admin");
+    let opts = TaskMonitorOptions::new()
+        .filter("monitor")
+        .password("admin");
 
-    let mut monitor = TaskMonitor::new(opts.build(), &docker);
+    let mut monitor = TaskMonitor::new(&opts, &docker);
 
     monitor.start().await;
 }

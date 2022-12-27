@@ -3,15 +3,16 @@ use crate::notifier::Notifier;
 use anyhow::{Error, Result};
 use futures::StreamExt;
 use shiplift::tty::TtyChunk;
-use shiplift::{Container, ContainerOptions, Docker, LogsOptions};
+use shiplift::{Container, ContainerOptions, Docker, LogsOptions, PullOptions};
 use std::collections::VecDeque;
 use std::path::PathBuf;
 use std::time::Duration;
 use tokio::time;
-use tracing::error;
 use tracing::info;
+use tracing::{error, warn};
 
-const ANSIBLE_IMAGE: &str = "spy86/ansible:latest";
+/// @link: https://hub.docker.com/r/willhallonline/ansible
+const ANSIBLE_IMAGE: &str = "willhallonline/ansible:alpine";
 /// Used to filter containers by the monitor instance
 const TASK_CONTAINER_NAME: &str = "svt-agent-task";
 /// Prevent starting the monitoring when commands executes immediately
@@ -20,13 +21,13 @@ const MONITOR_DEFAULT_PORT: u16 = 8888;
 
 #[derive(Debug)]
 pub struct Task {
-    /// Command numeric identifier
+    /// The numeric identifier of the [Task]
     pub id: u64,
-    /// Unique command identifier, used as password for monitoring
+    /// Unique identifier, used as password for monitoring
     pub uuid: String,
     /// Ansible playbook name
     pub playbook: String,
-    /// Added to the ansible-playbook command as `--extra-vars`
+    /// Variables added to the command in `--extra-vars`
     pub extra_vars: String,
 }
 
@@ -34,7 +35,7 @@ pub struct TaskRunner {
     /// The [Task] queue
     queue: VecDeque<Task>,
     docker: Docker,
-    playbook_path: PathBuf,
+    working_dir: PathBuf,
     monitor_port: u16,
     monitor_start_timeout_ms: u64,
     container_name: String,
@@ -45,15 +46,15 @@ impl TaskRunner {
         Self {
             queue: VecDeque::new(),
             docker: Docker::new(),
-            playbook_path: PathBuf::from("/app/playbooks"),
+            working_dir: PathBuf::from("/app"),
             monitor_start_timeout_ms: MONITOR_START_TIMEOUT_MS,
             monitor_port: MONITOR_DEFAULT_PORT,
             container_name: TASK_CONTAINER_NAME.to_string(),
         }
     }
 
-    pub fn with_playbook_path(&mut self, path: PathBuf) -> &mut Self {
-        self.playbook_path = path;
+    pub fn with_working_dir(&mut self, path: PathBuf) -> &mut Self {
+        self.working_dir = path;
         self
     }
 
@@ -62,9 +63,53 @@ impl TaskRunner {
         self
     }
 
+    /// Add new [task] to the [queue]
+    pub fn add_task(&mut self, task: Task) {
+        self.queue.push_back(task);
+    }
+
+    /// Ping the docker healthy
+    async fn ping(&self) -> Result<()> {
+        let res = self.docker.ping().await?;
+        info!("Docker ping: {}", res);
+        Ok(())
+    }
+
+    /// Prepare the runner before run tasks
+    /// Check is valid `working_dir`
+    /// Pull [ANSIBLE_IMAGE] if not exists
+    #[tracing::instrument(skip(self))]
+    pub async fn prepare(&self) -> Result<()> {
+        if !self.working_dir.is_dir() {
+            return Err(Error::msg(format!(
+                "Working dir `{}` is not exists...",
+                self.working_dir.to_str().unwrap()
+            )));
+        }
+
+        let mut stream = self
+            .docker
+            .images()
+            .pull(&PullOptions::builder().image(ANSIBLE_IMAGE).build());
+
+        while let Some(pull_result) = stream.next().await {
+            match pull_result {
+                Ok(output) => info!("{:?}", output),
+                Err(e) => {
+                    info!("Error: {}", e);
+                    return Err(Error::from(e));
+                }
+            }
+        }
+
+        Ok(())
+    }
+
     /// Try to run the front task from the [queue] and start the monitor instance if needed.
     #[tracing::instrument(skip(self))]
     pub async fn run(&mut self) -> Result<Option<Task>> {
+        self.ping().await?;
+
         if let Some(task) = self.queue.pop_front() {
             let mut notifier = Notifier::new(&task);
             let mut _err: Option<Error> = None;
@@ -72,12 +117,12 @@ impl TaskRunner {
 
             match self.run_task(&task).await {
                 Ok(container) => {
-                    notifier.notify_start().await;
+                    let _ = notifier.notify_start().await;
 
-                    let mut opts = TaskMonitorOptions::new();
-                    opts.filter(&self.container_name);
-                    opts.port(self.monitor_port);
-                    opts.password(&task.uuid);
+                    let opts = TaskMonitorOptions::new()
+                        .filter(&self.container_name)
+                        .port(self.monitor_port)
+                        .password(&task.uuid);
 
                     let mut monitor = TaskMonitor::new(&opts, &self.docker);
 
@@ -90,8 +135,8 @@ impl TaskRunner {
                             res = container.wait() => {
                                 match res {
                                     Ok(exit) => {
-                                        info!("Task finished...");
                                         is_success = exit.status_code == 0;
+                                        info!("Task finished (status code: {})...", exit.status_code);
                                     },
                                     Err(e) => _err = Some(Error::from(e))
                                 }
@@ -107,29 +152,31 @@ impl TaskRunner {
                         }
                     }
 
+                    // TODO: handle stderr
                     if is_success {
                         let output = get_container_logs(&container).await;
                         // println!("output: {:?}", output);
-                        notifier.notify_finish(output).await;
+                        let _ = notifier.notify_finish(output).await;
                     }
 
-                    if let Err(e) = container.delete().await {
-                        error!("Failed to delete task container. {}", e);
-                    }
+                    // if let Err(e) = container.delete().await {
+                    //     warn!("Failed to delete task container. {}", e);
+                    // }
 
-                    if let Err(e) = monitor.stop().await {
-                        error!("Failed to stop monitor. {}", e);
+                    if monitor.is_started() {
+                        if let Err(e) = monitor.stop().await {
+                            warn!("Failed to stop monitor. {}", e);
+                        }
                     }
                 }
                 Err(e) => {
-                    info!("Failed to run command");
-                    println!("{:?}", e);
+                    error!("Failed to run command. {:?}", e);
                     _err = Some(e);
                 }
             }
 
             if let Some(e) = _err {
-                notifier.notify_error(&e).await;
+                let _ = notifier.notify_error(&e).await;
                 return Err(e);
             }
 
@@ -142,30 +189,25 @@ impl TaskRunner {
 
     #[tracing::instrument(skip(self))]
     async fn run_task(&self, task: &Task) -> Result<Container> {
-        if !self.playbook_path.is_dir() {
-            return Err(Error::msg(format!(
-                "Playbooks path `{}` is invalid...",
-                self.playbook_path.to_str().unwrap()
-            )));
-        }
-
         let options = ContainerOptions::builder(ANSIBLE_IMAGE)
             .name(&self.container_name)
             .volumes(vec![
-                &format!("{}:/work:ro", self.playbook_path.to_str().unwrap()),
+                &format!("{}:/ansible:ro", self.working_dir.to_str().unwrap()),
                 // "~/.ansible/roles:/root/.ansible/roles",
                 // "~/.ssh:/root/.ssh:ro",
+                // "~/.ssh/id_rsa:/root/id_rsa",
             ])
             .cmd(vec![
                 "ansible-playbook",
-                &format!("{}.yml", task.playbook),
+                &format!("./playbooks/{}.yml", task.playbook),
                 &format!("-e {}", task.extra_vars),
                 "-i 127.0.0.1,",
                 "--connection=local",
-                "-vvv",
+                // "-vvv",
             ])
             // can't get container logs with auto_remove = true
             // .auto_remove(true)
+            .tty(true)
             .build();
 
         // Delete if exists
@@ -180,6 +222,7 @@ impl TaskRunner {
             // container is not exists...
         }
 
+        info!("Creating task container... {:?}", &options);
         let info = self.docker.containers().create(&options).await?;
         let container = self.docker.containers().get(&info.id);
         info!("Container Id:{:?}", container.id());
@@ -193,19 +236,13 @@ impl TaskRunner {
 
         Ok(container)
     }
-
-    /// Add new [task] to the [queue]
-    pub fn add_task(&mut self, task: Task) -> &mut Self {
-        self.queue.push_back(task);
-        self
-    }
 }
 
 /// Try to get the [container] output
 #[tracing::instrument(skip(container))]
 async fn get_container_logs(container: &Container<'_>) -> String {
     let mut res = String::new();
-    let mut logs_stream = container.logs(&LogsOptions::builder().stdout(true).stderr(true).build());
+    let mut logs_stream = container.logs(&LogsOptions::builder().stdout(true).build());
 
     while let Some(log_result) = logs_stream.next().await {
         match log_result {
@@ -234,7 +271,7 @@ mod tests {
         playbooks.push("playbooks");
 
         let mut runner = TaskRunner::new();
-        runner.with_playbook_path(playbooks);
+        runner.with_working_dir(playbooks);
 
         let task = Task {
             id: 0,
