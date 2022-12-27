@@ -18,7 +18,7 @@ FROM gcr.io/distroless/cc AS runtime
 WORKDIR app
 
 COPY --from=builder /app/target/release/svt-agent /usr/local/bin/app
-COPY ./playbooks ./playbooks
+COPY ./ansible/. ./
 
 ENV RUST_LOG=info
 
