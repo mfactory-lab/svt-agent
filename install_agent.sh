@@ -5,67 +5,120 @@ set -e
 # SVT Agent installation script
 #
 # Run command:
-#   curl -fsSL https://svt.one/install-agent.sh && sudo sh install-agent.sh
+#   CHANNEL_ID=QXK7qRCaabreGjcNHcKEadQDtTY9BJKHKfU11QAE6Xp CLUSTER=devnet \
+#   sh -c "$(curl -sSfL https://svt.one/install-agent.sh)"
 #
 
-VERSION="${VERSION:-latest}"
-CLUSTER="${VERSION:-devnet}"
-CONTAINER_NAME="${VERSION:-svt-agent}"
-EXPOSE_PORT="${EXPOSE_PORT:-8888}"
-CHANNEL_ID=
+AGENT_VERSION="${AGENT_VERSION:-latest}"
+CLUSTER="${CLUSTER:-devnet}"
+CONTAINER_NAME="${CONTAINER_NAME:-svt-agent}"
+EXPOSE_PORT="${EXPOSE_PORT:-8888}" # Port is used to view task logs
+SSHKEY_NAME="svt_agent_rsa"
+KEYPAIR_PATH="~/agent-keypair.json"
 
-generate_sshkeys() {
-  if [[ -f '~/.ssh/id_rsa' ]]; then
-      echo "Keyfile already exists - skipping"
+# ARE YOU ROOT (or sudo)?
+if [[ $EUID -ne 0 ]]; then
+	echo -e "ERROR: This script must be run as root"
+	exit 1
+fi
+
+do_install() {
+  echo "Installing SVT Agent..."
+
+  ensure is_valid_cluster $CLUSTER
+  # TODO: validate channel_id
+  # ensure is_valid_channel $CHANNEL_ID
+  ensure generate_sshkey $SSHKEY_NAME
+
+  if ! check_cmd "docker"; then
+    echo "Installing docker..."
+    sh -c "$(curl -fsSL https://get.docker.com)"
+    sudo systemctl start docker && sudo systemctl enable docker
+    echo "Done"
+  fi
+
+  #say "Setup firewall..."
+  #sudo ufw allow $EXPOSE_PORT/tcp
+  #say "Done"
+
+  say "Downloading agent image (release: $AGENT_VERSION)..."
+
+  ensure docker pull ghcr.io/mfactory-lab/svt-agent:$AGENT_VERSION
+  ignore docker stop $CONTAINER_NAME 2>/dev/null
+  ignore docker container rm $CONTAINER_NAME 2>/dev/null
+
+  # Generate agent keypair
+  if [[ -f $KEYPAIR_PATH ]]; then
+    echo "Agent keypair already exits"
   else
-      mkdir ~/.ssh
-      ssh-keygen -t rsa -b 4096 -f ~/.ssh/id_rsa -q -N ''
-      chmod 600 ~/.ssh/id_rsa
-      cat ~/.ssh/id_rsa.pub >> ~/.ssh/authorized_keys
+   ensure docker run --rm -it mfactory-lab/svt-agent:$AGENT_VERSION generate-keypair > $KEYPAIR_PATH
+  fi
+
+  if [[ ! -f $KEYPAIR_PATH ]]; then
+    err "Something went wrong. Agent keypair file is not exists."
+  fi
+
+#  # Run agent
+#  docker run -d -it --restart=always --name $CONTAINER_NAME \
+#    -v ~/.ssh/$SSHKEY_NAME:/root/.ssh/id_rsa \
+#    -v $KEYPAIR_PATH:/app/keypair.json \
+#    -p $EXPOSE_PORT:8888 \
+#    mfactory-lab/svt-agent:$AGENT_VERSION \
+#    --cluster $CLUSTER \
+#    --channel-id $CHANNEL_ID
+#
+#  echo "Done"
+#  echo "\n"
+#
+#  echo "Agent Pubkey: .."
+
+}
+
+generate_sshkey() {
+  if [[ -f ~/.ssh/$@ ]]; then
+      say "Keyfile already exists - skipping"
+  else
+      mkdir -p ~/.ssh
+      ssh-keygen -t rsa -b 4096 -f ~/.ssh/$@ -q -N '' -C 'svt-agent'
+      chmod 600 ~/.ssh/$@
+      cat ~/.ssh/$@.pub >> ~/.ssh/authorized_keys
+      say "Keyfile was generated"
   fi
 }
 
-do_install() {
-
-  generate_sshkeys();
-
-  echo "Installing docker..."
-  curl -fsSL https://get.docker.com -o get-docker.sh && sudo sh get-docker.sh
-  sudo systemctl start docker && sudo systemctl enable docker
-  echo "Done"
-
-  #echo "Setup firewall..."
-  #sudo ufw allow $EXPOSE_PORT/tcp
-  #echo "Done"
-
-  echo "Pull and run docker container..."
-
-  docker pull ghcr.io/mfactory-lab/svt-agent:$VERSION
-  docker stop $CONTAINER_NAME 2>/dev/null
-  docker container rm $CONTAINER_NAME 2>/dev/null
-
-  # Generate agent keypair
-  if [[ -f '~/agent-keypair.json' ]]; then
-    echo ""
+is_valid_cluster() {
+  if [[ "$@" =~ ^(mainnet|devnet|testnet)$ ]]; then
+    say "Cluster: $@"
   else
-    docker run --rm -it mfactory-lab/svt-agent:$VERSION generate-keypair > ~/agent-keypair.json
+    err "Invalid cluster \"$@\""
   fi
+}
 
-  docker run -d -it --restart=always --name $CONTAINER_NAME \
-    -v ~/.ssh/id_rsa:/root/.ssh/id_rsa \
-    -v ~/agent-keypair.json:/app/keypair.json \
-    -p $EXPOSE_PORT:8888 \
-    mfactory-lab/svt-agent:$VERSION \
-    --cluster $CLUSTER \
-    --channel-id $CHANNEL_ID
+check_cmd() {
+    command -v "$1" > /dev/null 2>&1
+}
 
-  echo "Done"
+say() {
+    printf 'svt-agent: %s\n' "$1"
+}
 
-  echo "\n"
+err() {
+    say "$1" >&2
+    exit 1
+}
 
-  echo "Agent Pubkey: .."
-  echo "Agent Cluster: $CLUSTER"
-  echo "Agent Channel ID: $CHANNEL_ID"
+# Run a command that should never fail. If the command fails execution
+# will immediately terminate with an error showing the failing
+# command.
+ensure() {
+    if ! "$@"; then err "command failed: $*"; fi
+}
+
+# This is just for indicating that commands' results are being
+# intentionally ignored. Usually, because it's being executed
+# as part of error handling.
+ignore() {
+    "$@"
 }
 
 # wrapped up in a function so that we have some protection against only getting

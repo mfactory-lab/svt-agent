@@ -1,17 +1,22 @@
 # SVT Agent
 
+```shell
+docker run -it --rm --name svt-agent \
+  -v /var/run/docker.sock:/var/run/docker.sock \
+  -v $(pwd)/keypair.json:/app/keypair.json \
+  svt-agent -k /app/keypair.json
+```
+
 ## Installation (install.sh)
-For ubuntu20
-- Install docker
-- docker pull svt-agent (agent + ansible + playbooks) image from registry
-- Supervisor: systemd service or docker compose ?
-- add authorized_keys (generate)
-- add new user `svt`, configure sudoers
+ubuntu20 (for now)
+- install docker
+- docker pull `svt-agent` image
+- add systemd with `docker run`
+- generate new `Keypair`
+- add authorized_keys for ansible
 
 ## Roadmap
 - Keypair (generate new or use validator vote_id or identity json file)
-- Run commands where id > `last_read_message_id`
-- Listen realtime events
 
 ## Command Runner
 ...
