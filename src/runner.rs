@@ -1,9 +1,11 @@
 use crate::monitor::{TaskMonitor, TaskMonitorOptions};
 use crate::notifier::Notifier;
+use anchor_lang::prelude::*;
 use anyhow::{Error, Result};
 use futures::StreamExt;
 use shiplift::tty::TtyChunk;
 use shiplift::{Container, ContainerOptions, Docker, LogsOptions, PullOptions};
+use sled::Db;
 use std::collections::VecDeque;
 use std::path::PathBuf;
 use std::time::Duration;
@@ -20,7 +22,7 @@ const MONITOR_START_TIMEOUT_MS: u64 = 2000;
 const DEFAULT_MONITOR_PORT: u16 = 8888;
 const DEFAULT_WORKING_DIR: &str = "/app";
 
-#[derive(Debug)]
+#[derive(Debug, Clone, AnchorSerialize, AnchorDeserialize, Eq, PartialEq)]
 pub struct Task {
     /// The numeric identifier of the [Task]
     pub id: u64,
@@ -32,10 +34,34 @@ pub struct Task {
     pub extra_vars: String,
 }
 
+#[derive(Debug, Clone, AnchorSerialize, AnchorDeserialize, Eq, PartialEq)]
+enum State {
+    Active(u64),
+    Complete(u64),
+    Pending,
+}
+
+impl Default for State {
+    fn default() -> Self {
+        Self::Pending
+    }
+}
+
+#[derive(Debug)]
+pub enum RunStatus {
+    Complete(u64),
+    EmptyQueue,
+}
+
 pub struct TaskRunner {
     /// The [Task] queue
     queue: VecDeque<Task>,
+    /// [Docker] instance (task running)
     docker: Docker,
+    /// [Db] instance (state persistence)
+    db: Option<Db>,
+    state: State,
+    /// Working directory with playbooks, config, etc
     working_dir: PathBuf,
     monitor_port: u16,
     monitor_start_timeout_ms: u64,
@@ -47,6 +73,8 @@ impl TaskRunner {
         Self {
             queue: VecDeque::new(),
             docker: Docker::new(),
+            state: State::default(),
+            db: None,
             working_dir: PathBuf::from(DEFAULT_WORKING_DIR),
             monitor_start_timeout_ms: MONITOR_START_TIMEOUT_MS,
             monitor_port: DEFAULT_MONITOR_PORT,
@@ -79,8 +107,8 @@ impl TaskRunner {
     /// Prepare the runner before run tasks
     /// Check is valid `working_dir`
     /// Pull [ANSIBLE_IMAGE] if not exists
-    #[tracing::instrument(skip(self))]
-    pub async fn prepare(&self) -> Result<()> {
+    #[tracing::instrument(skip_all)]
+    pub async fn init(&mut self) -> Result<()> {
         if !self.working_dir.is_dir() {
             return Err(Error::msg(format!(
                 "Working dir `{}` is not exists...",
@@ -88,7 +116,15 @@ impl TaskRunner {
             )));
         }
 
-        // download ansible image first
+        // initialize db
+        let home = self.working_dir.to_str().unwrap();
+        self.db = Some(sled::open(format!("{}/db", home))?);
+
+        if let Err(e) = self.load_state() {
+            info!("Failed to load state. {}", e);
+        }
+
+        // pull ansible image first
         let mut stream = self
             .docker
             .images()
@@ -108,14 +144,25 @@ impl TaskRunner {
     }
 
     /// Try to run the front task from the [queue] and start the monitor instance if needed.
-    #[tracing::instrument(skip(self))]
-    pub async fn run(&mut self) -> Result<Option<Task>> {
+    /// Return [Task] if container status code present
+    #[tracing::instrument(skip_all)]
+    pub async fn run(&mut self) -> Result<RunStatus> {
         self.ping().await?;
+
+        if self.queue.is_empty() {
+            return Ok(RunStatus::EmptyQueue);
+        }
+
+        if let State::Complete(id) = &self.state {
+            return Ok(RunStatus::Complete(*id));
+        }
 
         if let Some(task) = self.queue.pop_front() {
             let mut notifier = Notifier::new(&task);
             let mut notify_error: Option<Error> = None;
             let mut status_code: Option<u64> = None;
+
+            self.set_state(State::Active(task.id));
 
             match self.run_task(&task).await {
                 Ok(container) => {
@@ -154,22 +201,23 @@ impl TaskRunner {
                         }
                     }
 
+                    // retrieve logs only if status code is present
                     if let Some(status_code) = status_code {
                         let output = get_container_logs(
                             &container,
                             match status_code {
-                                0 => ContainerLogFlags::STD_OUT,
-                                1 => ContainerLogFlags::STD_ERR,
-                                _ => ContainerLogFlags::ALL,
+                                0 => ContainerLogFlags::StdOut,
+                                1 => ContainerLogFlags::StdErr,
+                                _ => ContainerLogFlags::All,
                             },
                         )
                         .await;
                         let _ = notifier.notify_finish(status_code, output).await;
                     }
 
-                    // if let Err(e) = container.delete().await {
-                    //     warn!("Failed to delete task container. {}", e);
-                    // }
+                    if let Err(e) = container.delete().await {
+                        warn!("Failed to delete task container. {}", e);
+                    }
 
                     if monitor.is_started() {
                         if let Err(e) = monitor.stop().await {
@@ -189,14 +237,19 @@ impl TaskRunner {
             }
 
             if status_code.is_some() {
-                return Ok(Some(task));
+                let id = task.id;
+                self.set_state(State::Complete(task.id));
+                return Ok(RunStatus::Complete(id));
             }
         }
-        Ok(None)
+        Ok(RunStatus::EmptyQueue)
     }
 
-    #[tracing::instrument(skip(self))]
+    #[tracing::instrument(skip_all)]
     async fn run_task(&self, task: &Task) -> Result<Container> {
+        // TODO: think about uniq name for each task
+        // let container_name = format!("{}_{}", TASK_CONTAINER_NAME, task.id);
+
         // Delete if exists
         if let Err(_e) = self
             .docker
@@ -218,9 +271,8 @@ impl TaskRunner {
             // .privileged(true)
             .volumes(vec![
                 &format!("{}:/ansible:ro", self.working_dir.to_str().unwrap()),
+                "/root/.ssh/id_rsa:/root/.ssh/id_rsa:ro",
                 // "~/.ansible/roles:/root/.ansible/roles",
-                // "~/.ssh:/root/.ssh:ro",
-                // "~/.ssh/id_rsa:/root/.ssh/id_rsa",
             ])
             .cmd(vec![
                 "ansible-playbook",
@@ -247,13 +299,40 @@ impl TaskRunner {
 
         Ok(container)
     }
+
+    fn reset_state(&mut self) -> Result<()> {
+        self.set_state(State::default())
+    }
+
+    fn set_state(&mut self, state: State) -> Result<()> {
+        self.state = state;
+        self.sync_state()
+    }
+
+    fn load_state(&mut self) -> Result<()> {
+        if let Some(db) = &self.db {
+            let bytes = db.get("runner_state")?;
+            if let Some(bytes) = bytes {
+                self.state = State::try_from_slice(&bytes)?;
+            }
+        }
+        Ok(())
+    }
+
+    fn sync_state(&self) -> Result<()> {
+        if let Some(db) = &self.db {
+            let bytes = self.state.try_to_vec()?;
+            db.insert("runner_state", bytes)?;
+        }
+        Ok(())
+    }
 }
 
-//noinspection RsModuleNaming
+#[allow(non_snake_case, non_upper_case_globals)]
 mod ContainerLogFlags {
-    pub const STD_OUT: u8 = 0x01;
-    pub const STD_ERR: u8 = 0x02;
-    pub const ALL: u8 = 0xFF;
+    pub const StdOut: u8 = 0x01;
+    pub const StdErr: u8 = 0x02;
+    pub const All: u8 = 0xFF;
 }
 
 /// Try to get the [container] output
@@ -273,12 +352,12 @@ async fn get_container_logs(container: &Container<'_>, mode: u8) -> String {
         match log_result {
             Ok(chunk) => match chunk {
                 TtyChunk::StdOut(bytes) => {
-                    if mode & ContainerLogFlags::STD_OUT == 1 {
+                    if mode & ContainerLogFlags::StdOut == 1 {
                         res.push_str(std::str::from_utf8(&bytes).unwrap());
                     }
                 }
                 TtyChunk::StdErr(bytes) => {
-                    if mode & ContainerLogFlags::STD_ERR == 2 {
+                    if mode & ContainerLogFlags::StdErr == 2 {
                         res.push_str(std::str::from_utf8(&bytes).unwrap());
                     }
                 }
