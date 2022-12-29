@@ -9,3 +9,6 @@ pub const COMMAND_DELIMITER: &str = "<!>";
 pub const COMMAND_POLL_INTERVAL: u64 = 5000;
 
 pub const WAIT_AUTHORIZATION_INTERVAL: u64 = 10000;
+
+// Needed min balance before running commands
+pub const MIN_BALANCE_REQUIRED: u64 = 5000;

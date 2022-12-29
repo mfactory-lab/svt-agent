@@ -8,20 +8,20 @@ mod state;
 mod utils;
 
 use crate::listener::Listener;
-use crate::runner::{Task, TaskRunner};
+use crate::runner::{RunStatus, Task, TaskRunner};
 use crate::utils::{convert_message_to_task, MessengerClient};
 use anchor_client::solana_client::nonblocking::pubsub_client::PubsubClient;
 use anchor_client::solana_client::rpc_config::RpcTransactionLogsFilter;
 use anchor_client::solana_sdk::pubkey::Pubkey;
-use anchor_client::solana_sdk::signature::read_keypair_file;
+use anchor_client::solana_sdk::signature::{read_keypair_file, Keypair};
 use anchor_client::Cluster;
 use anyhow::{Error, Result};
-use clap::Parser;
+use clap::{Args, Parser, Subcommand};
 use constants::*;
+use rand::rngs::OsRng;
 use state::*;
 use std::fmt::Debug;
 use std::path::PathBuf;
-use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::{mpsc, RwLock};
@@ -33,41 +33,80 @@ use tracing_subscriber::util::SubscriberInitExt;
 use tracing_subscriber::{EnvFilter, Registry};
 use tracing_tree::HierarchicalLayer;
 
+const VERSION: &str = env!("CARGO_PKG_VERSION");
+
 #[derive(Parser, Debug)]
 #[command(name = "SVT Agent")]
-#[command(version = "1.0")]
+#[command(version = VERSION)]
 #[command(about = "SVT Agent", long_about = None)]
 struct Cli {
-    #[arg(short, long, value_name = "KEYPAIR")]
+    #[command(subcommand)]
+    command: Commands,
+}
+
+#[derive(Subcommand, Debug)]
+enum Commands {
+    GenerateKeypair,
+    CheckChannel {
+        #[arg(short, long, value_name = "CLUSTER", default_value = "devnet")]
+        cluster: Cluster,
+        #[arg(short, long, value_name = "CHANNEL")]
+        channel_id: Pubkey,
+        #[arg(short, long, value_name = "MESSENGER_PROGRAM", default_value = MESSENGER_PROGRAM_ID)]
+        program_id: Pubkey,
+    },
+    Run(RunArgs),
+}
+
+#[derive(Args, Debug)]
+struct RunArgs {
+    #[arg(long, value_name = "KEYPAIR", default_value = "/app/keypair.json")]
     keypair: PathBuf,
-    #[arg(long, value_name = "CLUSTER", default_value = "d")]
+    #[arg(short, long, value_name = "CLUSTER", default_value = "devnet")]
     cluster: Cluster,
     #[arg(short, long, value_name = "CHANNEL", default_value = DEFAULT_CHANNEL_ID)]
-    channel_id: String,
+    channel_id: Pubkey,
     #[arg(short, long, value_name = "MESSENGER_PROGRAM", default_value = MESSENGER_PROGRAM_ID)]
-    messenger_program_id: String,
+    program_id: Pubkey,
     #[arg(short, long, value_name = "WORKING_DIR")]
     working_dir: Option<PathBuf>,
 }
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<()> {
-    // Initialize tracing
-    Registry::default()
-        .with(EnvFilter::from_default_env())
-        .with(
-            HierarchicalLayer::new(2)
-                .with_targets(true)
-                .with_bracketed_fields(true),
-        )
-        // .with(
-        //     tracing_subscriber::fmt::layer()
-        //         .json()
-        //         .with_writer(|| File::create("/var/log/agent-log.json").unwrap()),
-        // )
-        .init();
+    let cli = Cli::parse();
 
-    Agent::new(Cli::parse())?.run().await?;
+    match &cli.command {
+        Commands::CheckChannel {
+            channel_id,
+            cluster,
+            program_id,
+        } => {
+            let client = MessengerClient::new(cluster.clone(), *program_id, Keypair::new());
+            let channel = client.load_channel(channel_id).await;
+            println!("{}", if channel.is_ok() { "OK" } else { "ERROR" })
+        }
+        Commands::GenerateKeypair => {
+            let kp = Keypair::generate(&mut OsRng);
+            println!("{:?}", kp.to_bytes())
+        }
+        Commands::Run(args) => {
+            Registry::default()
+                .with(EnvFilter::from_default_env())
+                .with(
+                    HierarchicalLayer::new(2)
+                        .with_targets(true)
+                        .with_bracketed_fields(true),
+                )
+                // .with(
+                //     tracing_subscriber::fmt::layer()
+                //         .json()
+                //         .with_writer(|| File::create("/var/log/agent-log.json").unwrap()),
+                // )
+                .init();
+            Agent::new(args)?.run().await?;
+        }
+    }
 
     Ok(())
 }
@@ -85,18 +124,22 @@ struct Agent {
 
 impl Agent {
     #[tracing::instrument]
-    fn new(cli: Cli) -> Result<Self> {
-        let keypair = read_keypair_file(cli.keypair).expect("Authority keypair required");
-        let program_id = Pubkey::from_str(&cli.messenger_program_id)?;
-        let channel_id = Pubkey::from_str(&cli.channel_id)?;
+    fn new(args: &RunArgs) -> Result<Self> {
+        let keypair = read_keypair_file(&args.keypair).expect("Authority keypair required");
+        let program_id = args.program_id;
+        let channel_id = args.channel_id;
 
         let mut runner = TaskRunner::new();
 
-        if let Some(working_dir) = cli.working_dir {
-            runner.with_working_dir(working_dir);
+        if let Some(working_dir) = &args.working_dir {
+            runner.with_working_dir(working_dir.into());
         }
 
-        let client = Arc::new(MessengerClient::new(cli.cluster, program_id, keypair));
+        let client = Arc::new(MessengerClient::new(
+            args.cluster.clone(),
+            args.program_id,
+            keypair,
+        ));
 
         Ok(Self {
             program_id,
@@ -106,15 +149,17 @@ impl Agent {
         })
     }
 
-    #[tracing::instrument(skip(self))]
+    #[tracing::instrument(skip_all)]
     async fn run(&self) -> Result<()> {
+        info!("Cluster {:?}", self.client.cluster);
         info!("Program ID {:?}", self.program_id);
         info!("Channel ID {:?}", self.channel_id);
 
-        self.runner.read().await.prepare().await?;
+        self.init().await?;
 
+        // Trying to access a channel
         let cek = loop {
-            match self.prepare().await {
+            match self.authorize().await {
                 Ok(cek) => break cek,
                 Err(e) => {
                     warn!("Error: {}", e);
@@ -123,7 +168,7 @@ impl Agent {
             }
         };
 
-        // The channel than handle `NewMessageEvent` events
+        // The channel that handle `NewMessageEvent` events
         let (sender, receiver) = mpsc::unbounded_channel::<NewMessageEvent>();
 
         let (_, _, _) = tokio::join!(
@@ -135,11 +180,17 @@ impl Agent {
         Ok(())
     }
 
+    #[tracing::instrument(skip_all)]
+    async fn init(&self) -> Result<()> {
+        self.runner.write().await.init().await?;
+        Ok(())
+    }
+
     /// This method try to load the [ChannelMembership] account.
     /// If the membership doesn't exists, a `join request` will be sent.
     /// If membership status is authorized, try to load [ChannelDevice] and return the `CEK`.
-    #[tracing::instrument(skip(self))]
-    async fn prepare(&self) -> Result<Vec<u8>> {
+    #[tracing::instrument(skip_all)]
+    async fn authorize(&self) -> Result<Vec<u8>> {
         let membership = self.client.load_membership(&self.channel_id).await;
 
         match membership {
@@ -200,23 +251,34 @@ impl Agent {
 
             async move {
                 loop {
+                    let balance = client.get_balance().await;
+                    if balance < MIN_BALANCE_REQUIRED {
+                        info!(
+                            "Waiting positive balance (at least {} lamports)...",
+                            MIN_BALANCE_REQUIRED
+                        );
+                        time::sleep(Duration::from_millis(COMMAND_POLL_INTERVAL)).await;
+                        continue;
+                    }
+
                     match runner.write().await.run().await {
-                        Ok(maybe_task) => {
-                            if let Some(task) = maybe_task {
-                                info!("[command_runner] Confirming Task#{}...", task.id);
-                                // match client.read_message(task.id, &channel_id).await {
-                                //     Ok(sig) => {
-                                //         info!(
-                                //             "[command_runner] Confirmed Task#{}! Signature: {}",
-                                //             task.id, sig
-                                //         );
-                                //     }
-                                //     Err(e) => {
-                                //         error!("[command_runner][read_message] Error: {}", e);
-                                //     }
-                                // }
+                        Ok(res) => match res {
+                            RunStatus::Complete(task_id) => {
+                                info!("[command_runner] Confirming Task#{}...", task_id);
+                                match client.read_message(task_id, &channel_id).await {
+                                    Ok(sig) => {
+                                        info!(
+                                            "[command_runner] Confirmed Task#{}! Signature: {}",
+                                            task_id, sig
+                                        );
+                                    }
+                                    Err(e) => {
+                                        error!("[command_runner][read_message] Error: {}", e);
+                                    }
+                                }
                             }
-                        }
+                            RunStatus::EmptyQueue => {}
+                        },
                         Err(e) => {
                             error!("[command_runner] Error: {}", e)
                         }
@@ -302,11 +364,11 @@ impl Agent {
 async fn test_agent_init() {
     let keypair = PathBuf::from("./keypair.json");
 
-    let agent = Agent::new(Cli {
+    let agent = Agent::new(&RunArgs {
         keypair,
         cluster: Cluster::Devnet,
-        channel_id: DEFAULT_CHANNEL_ID.to_string(),
-        messenger_program_id: MESSENGER_PROGRAM_ID.to_string(),
+        channel_id: DEFAULT_CHANNEL_ID.parse().unwrap(),
+        program_id: MESSENGER_PROGRAM_ID.parse().unwrap(),
         working_dir: None,
     })
     .unwrap();
