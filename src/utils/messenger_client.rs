@@ -13,6 +13,7 @@ use anchor_lang::prelude::*;
 use anyhow::Result;
 use tracing::info;
 
+/// Display name in the channel
 const AGENT_NAME: &str = "agent";
 
 pub struct MessengerClient {
@@ -35,6 +36,12 @@ impl MessengerClient {
             program_id,
             authority,
         }
+    }
+
+    /// Retrieve [authority] balance
+    pub async fn get_balance(&self) -> u64 {
+        let authority = self.authority.pubkey();
+        (self.rpc.get_balance(&authority).await).unwrap_or(0)
     }
 
     #[tracing::instrument(skip(self))]
