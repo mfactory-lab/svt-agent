@@ -1,5 +1,5 @@
 #!/bin/bash
-set -e
+#set -e
 
 #
 # SVT Agent installation script
@@ -13,14 +13,14 @@ AGENT_VERSION="${AGENT_VERSION:-latest}"
 CLUSTER="${CLUSTER:-devnet}"
 CONTAINER_NAME="${CONTAINER_NAME:-svt-agent}"
 EXPOSE_PORT="${EXPOSE_PORT:-8888}" # Port is used to view task logs
-SSHKEY_NAME="svt_agent_rsa"
-KEYPAIR_PATH="~/agent-keypair.json"
+SSHKEY_PATH="$HOME/.ssh/svt-agent"
+KEYPAIR_PATH="$HOME/agent-keypair.json"
 
 # ARE YOU ROOT (or sudo)?
-if [[ $EUID -ne 0 ]]; then
-	echo -e "ERROR: This script must be run as root"
-	exit 1
-fi
+#if [[ $EUID -ne 0 ]]; then
+#	echo -e "ERROR: This script must be run as root"
+#	exit 1
+#fi
 
 do_install() {
   echo "Installing SVT Agent..."
@@ -28,7 +28,11 @@ do_install() {
   ensure is_valid_cluster $CLUSTER
   # TODO: validate channel_id
   # ensure is_valid_channel $CHANNEL_ID
-  ensure generate_sshkey $SSHKEY_NAME
+  ensure generate_sshkey "id_rsa"
+
+  if [ -z "$CHANNEL_ID" ]; then
+    err "Please provide \"CHANNEL_ID\""
+  fi
 
   if ! check_cmd "docker"; then
     echo "Installing docker..."
@@ -43,45 +47,45 @@ do_install() {
 
   say "Downloading agent image (release: $AGENT_VERSION)..."
 
-  ensure docker pull ghcr.io/mfactory-lab/svt-agent:$AGENT_VERSION
-  ignore docker stop $CONTAINER_NAME 2>/dev/null
-  ignore docker container rm $CONTAINER_NAME 2>/dev/null
+#  ensure docker pull ghcr.io/mfactory-lab/svt-agent:$AGENT_VERSION
+  docker stop $CONTAINER_NAME 2>/dev/null
+  docker container rm $CONTAINER_NAME 2>/dev/null
 
   # Generate agent keypair
   if [[ -f $KEYPAIR_PATH ]]; then
-    echo "Agent keypair already exits"
+    say "Agent keypair already exits ($KEYPAIR_PATH)"
   else
-   ensure docker run --rm -it mfactory-lab/svt-agent:$AGENT_VERSION generate-keypair > $KEYPAIR_PATH
+    say "Generate new agent keypair... ($KEYPAIR_PATH)"
+    KEYPAIR="$(docker run --rm -it mfactory-lab/svt-agent:$AGENT_VERSION generate-keypair)"
+    echo $KEYPAIR > $KEYPAIR_PATH
   fi
 
   if [[ ! -f $KEYPAIR_PATH ]]; then
     err "Something went wrong. Agent keypair file is not exists."
   fi
 
-#  # Run agent
-#  docker run -d -it --restart=always --name $CONTAINER_NAME \
-#    -v ~/.ssh/$SSHKEY_NAME:/root/.ssh/id_rsa \
-#    -v $KEYPAIR_PATH:/app/keypair.json \
-#    -p $EXPOSE_PORT:8888 \
-#    mfactory-lab/svt-agent:$AGENT_VERSION \
-#    --cluster $CLUSTER \
-#    --channel-id $CHANNEL_ID
-#
-#  echo "Done"
-#  echo "\n"
-#
-#  echo "Agent Pubkey: .."
+  # Run agent
+  docker run -d -it --restart=always --name $CONTAINER_NAME \
+    -v /var/run/docker.sock:/var/run/docker.sock \
+    -v $SSHKEY_PATH:/root/.ssh \
+    -v $KEYPAIR_PATH:/app/keypair.json \
+    -p $EXPOSE_PORT:8888 \
+    mfactory-lab/svt-agent:$AGENT_VERSION \
+    run \
+    --cluster $CLUSTER \
+    -c $CHANNEL_ID
 
+  say "Done"
 }
 
 generate_sshkey() {
-  if [[ -f ~/.ssh/$@ ]]; then
+  if [[ -f $SSHKEY_PATH/$@ ]]; then
       say "Keyfile already exists - skipping"
   else
-      mkdir -p ~/.ssh
-      ssh-keygen -t rsa -b 4096 -f ~/.ssh/$@ -q -N '' -C 'svt-agent'
-      chmod 600 ~/.ssh/$@
-      cat ~/.ssh/$@.pub >> ~/.ssh/authorized_keys
+      mkdir -p $SSHKEY_PATH
+      ssh-keygen -t rsa -b 4096 -f $SSHKEY_PATH/$@ -q -N '' -C 'svt-agent'
+      chmod 600 $SSHKEY_PATH/$@
+      cat $SSHKEY_PATH/$@.pub >> ~/.ssh/authorized_keys
       say "Keyfile was generated"
   fi
 }
