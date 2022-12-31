@@ -1,5 +1,6 @@
 [package]
 name = "svt-agent"
+description = ""
 version = "0.1.2"
 authors = ["Vladyslav Korniienko <vk.tiamo@gmail.com>"]
 repository = "https://github.com/mfactory-lab/svt-agent"

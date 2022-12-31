@@ -8,7 +8,7 @@ mod state;
 mod utils;
 
 use crate::listener::Listener;
-use crate::runner::{RunStatus, Task, TaskRunner};
+use crate::runner::{RunState, Task, TaskRunner};
 use crate::utils::{convert_message_to_task, MessengerClient};
 use anchor_client::solana_client::nonblocking::pubsub_client::PubsubClient;
 use anchor_client::solana_client::rpc_config::RpcTransactionLogsFilter;
@@ -33,12 +33,10 @@ use tracing_subscriber::util::SubscriberInitExt;
 use tracing_subscriber::{EnvFilter, Registry};
 use tracing_tree::HierarchicalLayer;
 
-const VERSION: &str = env!("CARGO_PKG_VERSION");
-
 #[derive(Parser, Debug)]
-#[command(name = "SVT Agent")]
-#[command(version = VERSION)]
-#[command(about = "SVT Agent", long_about = None)]
+#[command(name = env!("CARGO_PKG_NAME"))]
+#[command(version = env!("CARGO_PKG_VERSION"))]
+#[command(about = env!("CARGO_PKG_DESCRIPTION"), long_about = None)]
 struct Cli {
     #[command(subcommand)]
     command: Commands,
@@ -48,7 +46,7 @@ struct Cli {
 enum Commands {
     GenerateKeypair,
     CheckChannel {
-        #[arg(short, long, value_name = "CLUSTER", default_value = "devnet")]
+        #[arg(long, value_name = "CLUSTER", default_value = "devnet")]
         cluster: Cluster,
         #[arg(short, long, value_name = "CHANNEL")]
         channel_id: Pubkey,
@@ -60,9 +58,14 @@ enum Commands {
 
 #[derive(Args, Debug)]
 struct RunArgs {
-    #[arg(long, value_name = "KEYPAIR", default_value = "/app/keypair.json")]
+    #[arg(
+        long,
+        short,
+        value_name = "KEYPAIR",
+        default_value = "/app/keypair.json"
+    )]
     keypair: PathBuf,
-    #[arg(short, long, value_name = "CLUSTER", default_value = "devnet")]
+    #[arg(long, value_name = "CLUSTER", default_value = "devnet")]
     cluster: Cluster,
     #[arg(short, long, value_name = "CHANNEL", default_value = DEFAULT_CHANNEL_ID)]
     channel_id: Pubkey,
@@ -243,6 +246,7 @@ impl Agent {
 
     /// This method waits and runs commands from the runner queue at some interval.
     /// TODO: retry on fail, read_message on fail
+    #[tracing::instrument(skip_all)]
     fn command_runner(&self) -> JoinHandle<()> {
         tokio::spawn({
             let runner = self.runner.clone();
@@ -252,6 +256,7 @@ impl Agent {
             async move {
                 loop {
                     let balance = client.get_balance().await;
+                    info!("Balance: {} lamports", balance);
                     if balance < MIN_BALANCE_REQUIRED {
                         info!(
                             "Waiting positive balance (at least {} lamports)...",
@@ -261,36 +266,45 @@ impl Agent {
                         continue;
                     }
 
-                    match runner.write().await.run().await {
+                    let mut runner = runner.write().await;
+
+                    match runner.run().await {
                         Ok(res) => match res {
-                            RunStatus::Complete(task_id) => {
-                                info!("[command_runner] Confirming Task#{}...", task_id);
+                            RunState::Complete(task_id) => {
+                                info!("Confirming Task#{}...", task_id);
                                 match client.read_message(task_id, &channel_id).await {
                                     Ok(sig) => {
-                                        info!(
-                                            "[command_runner] Confirmed Task#{}! Signature: {}",
-                                            task_id, sig
-                                        );
+                                        info!("Confirmed Task#{}! Signature: {}", task_id, sig);
+                                        // reset state only if the command is confirmed
+                                        runner.reset_state();
                                     }
                                     Err(e) => {
-                                        error!("[command_runner][read_message] Error: {}", e);
+                                        error!("ReadMessage Error: {}", e);
                                     }
                                 }
                             }
-                            RunStatus::EmptyQueue => {}
+                            RunState::Error(_) => {
+                                // probably internal docker error
+                                // TODO: is it need to be confirmed ?
+                                runner.reset_state();
+                            }
+                            _ => {}
                         },
                         Err(e) => {
-                            error!("[command_runner] Error: {}", e)
+                            error!("Error: {}", e)
                         }
                     };
-                    info!("[command_runner] Waiting a command...");
+
+                    info!("Waiting a command...");
                     time::sleep(Duration::from_millis(COMMAND_POLL_INTERVAL)).await;
                 }
             }
         })
     }
 
-    /// Process [NewMessageEvent] events convert to the [Task] and add to the runner queue.
+    /// Receives a [NewMessageEvent] from the [receiver],
+    /// convert it to the [Task] and add to the runner queue.
+    #[tracing::instrument(skip_all)]
     fn command_processor(
         &self,
         mut receiver: mpsc::UnboundedReceiver<NewMessageEvent>,
@@ -305,7 +319,7 @@ impl Agent {
                             runner.write().await.add_task(task);
                         }
                         Err(_) => {
-                            info!("[command_processor] Failed to convert message to task");
+                            info!("Failed to convert message to task");
                         }
                     }
                 }
@@ -314,6 +328,7 @@ impl Agent {
     }
 
     /// Listen for [NewMessageEvent] events and send them to the `sender`.
+    #[tracing::instrument(skip_all)]
     fn command_listener(&self, sender: mpsc::UnboundedSender<NewMessageEvent>) -> JoinHandle<()> {
         tokio::spawn({
             let url = self.client.cluster.ws_url().to_owned();
@@ -322,16 +337,17 @@ impl Agent {
             async move {
                 loop {
                     info!("Connecting to `{}`...", url);
+
                     let client = PubsubClient::new(url.as_str())
                         .await
                         .expect("Failed to init `PubsubClient`");
 
-                    info!("[command_listener] Waiting a command...");
+                    info!("Waiting a command...");
 
                     let listener = Listener::new(&program_id, &client, &filter);
                     match listener
                         .on::<NewMessageEvent>(|e| {
-                            info!("[command_listener] {:?}", e);
+                            info!("{:?}", e);
                             match sender.send(e) {
                                 Ok(_) => {}
                                 Err(e) => {
@@ -343,16 +359,16 @@ impl Agent {
                     {
                         Ok(_) => {}
                         Err(e) => {
-                            error!("[command_listener] Error: {:?}", e);
+                            error!("Error: {:?}", e);
                         }
                     }
                     match &client.shutdown().await {
                         Ok(_) => {}
                         Err(e) => {
-                            info!("[command_listener] Failed to shutdown client ({})", e);
+                            info!("Failed to shutdown client ({})", e);
                         }
                     }
-                    info!("[command_listener] Reconnecting...");
+                    info!("Reconnecting...");
                     time::sleep(Duration::from_millis(3000)).await;
                 }
             }

@@ -1,3 +1,4 @@
+use crate::constants::ANSIBLE_IMAGE;
 use crate::monitor::{TaskMonitor, TaskMonitorOptions};
 use crate::notifier::Notifier;
 use anchor_lang::prelude::*;
@@ -13,8 +14,6 @@ use tokio::time;
 use tracing::info;
 use tracing::{error, warn};
 
-/// @link: https://hub.docker.com/r/willhallonline/ansible
-const ANSIBLE_IMAGE: &str = "willhallonline/ansible:alpine";
 /// Used to filter containers by the monitor instance
 const TASK_CONTAINER_NAME: &str = "svt-agent-task";
 /// Prevent starting the monitoring when commands executes immediately
@@ -35,32 +34,26 @@ pub struct Task {
 }
 
 #[derive(Debug, Clone, AnchorSerialize, AnchorDeserialize, Eq, PartialEq)]
-enum State {
-    Active(u64),
+pub enum RunState {
     Complete(u64),
+    Error(u64),
     Pending,
 }
 
-impl Default for State {
+impl Default for RunState {
     fn default() -> Self {
         Self::Pending
     }
 }
 
-#[derive(Debug)]
-pub enum RunStatus {
-    Complete(u64),
-    EmptyQueue,
-}
-
 pub struct TaskRunner {
     /// The [Task] queue
     queue: VecDeque<Task>,
+    state: RunState,
     /// [Docker] instance (task running)
     docker: Docker,
     /// [Db] instance (state persistence)
     db: Option<Db>,
-    state: State,
     /// Working directory with playbooks, config, etc
     working_dir: PathBuf,
     monitor_port: u16,
@@ -73,12 +66,12 @@ impl TaskRunner {
         Self {
             queue: VecDeque::new(),
             docker: Docker::new(),
-            state: State::default(),
-            db: None,
+            state: RunState::default(),
             working_dir: PathBuf::from(DEFAULT_WORKING_DIR),
             monitor_start_timeout_ms: MONITOR_START_TIMEOUT_MS,
             monitor_port: DEFAULT_MONITOR_PORT,
             container_name: TASK_CONTAINER_NAME.to_string(),
+            db: None,
         }
     }
 
@@ -90,11 +83,6 @@ impl TaskRunner {
     pub fn with_monitor_port(&mut self, port: u16) -> &mut Self {
         self.monitor_port = port;
         self
-    }
-
-    /// Add new [task] to the [queue]
-    pub fn add_task(&mut self, task: Task) {
-        self.queue.push_back(task);
     }
 
     /// Ping the docker healthy
@@ -121,7 +109,7 @@ impl TaskRunner {
         self.db = Some(sled::open(format!("{}/db", home))?);
 
         if let Err(e) = self.load_state() {
-            info!("Failed to load state. {}", e);
+            info!("Failed to load initial state. {}", e);
         }
 
         // pull ansible image first
@@ -146,23 +134,21 @@ impl TaskRunner {
     /// Try to run the front task from the [queue] and start the monitor instance if needed.
     /// Return [Task] if container status code present
     #[tracing::instrument(skip_all)]
-    pub async fn run(&mut self) -> Result<RunStatus> {
+    pub async fn run(&mut self) -> Result<RunState> {
         self.ping().await?;
 
-        if self.queue.is_empty() {
-            return Ok(RunStatus::EmptyQueue);
-        }
-
-        if let State::Complete(id) = &self.state {
-            return Ok(RunStatus::Complete(*id));
+        // if current state is complete or error, just return it
+        match &self.state {
+            RunState::Complete(_) | RunState::Error(_) => {
+                return Ok(self.state.clone());
+            }
+            _ => {}
         }
 
         if let Some(task) = self.queue.pop_front() {
             let mut notifier = Notifier::new(&task);
             let mut notify_error: Option<Error> = None;
             let mut status_code: Option<u64> = None;
-
-            self.set_state(State::Active(task.id));
 
             match self.run_task(&task).await {
                 Ok(container) => {
@@ -232,19 +218,26 @@ impl TaskRunner {
             }
 
             if let Some(e) = notify_error {
+                self.set_state(RunState::Error(task.id));
                 let _ = notifier.notify_error(&e).await;
                 return Err(e);
             }
 
             if status_code.is_some() {
-                let id = task.id;
-                self.set_state(State::Complete(task.id));
-                return Ok(RunStatus::Complete(id));
+                self.set_state(RunState::Complete(task.id));
+                return Ok(self.state.clone());
             }
         }
-        Ok(RunStatus::EmptyQueue)
+
+        Ok(RunState::Pending)
     }
 
+    /// Add new [task] to the [queue]
+    pub fn add_task(&mut self, task: Task) {
+        self.queue.push_back(task);
+    }
+
+    /// Run the [task] isolated through docker container
     #[tracing::instrument(skip_all)]
     async fn run_task(&self, task: &Task) -> Result<Container> {
         // TODO: think about uniq name for each task
@@ -300,11 +293,12 @@ impl TaskRunner {
         Ok(container)
     }
 
-    fn reset_state(&mut self) -> Result<()> {
-        self.set_state(State::default())
+    pub fn reset_state(&mut self) -> Result<()> {
+        self.set_state(RunState::default())
     }
 
-    fn set_state(&mut self, state: State) -> Result<()> {
+    fn set_state(&mut self, state: RunState) -> Result<()> {
+        info!("New state... {:?}", &state);
         self.state = state;
         self.sync_state()
     }
@@ -313,7 +307,7 @@ impl TaskRunner {
         if let Some(db) = &self.db {
             let bytes = db.get("runner_state")?;
             if let Some(bytes) = bytes {
-                self.state = State::try_from_slice(&bytes)?;
+                self.state = RunState::try_from_slice(&bytes)?;
             }
         }
         Ok(())
