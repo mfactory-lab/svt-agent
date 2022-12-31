@@ -38,17 +38,20 @@ impl MessengerClient {
         }
     }
 
+    /// Retrieve [authority] pubkey
+    pub fn authority_pubkey(&self) -> Pubkey {
+        self.authority.pubkey()
+    }
+
     /// Retrieve [authority] balance
     pub async fn get_balance(&self) -> u64 {
-        let authority = self.authority.pubkey();
-        (self.rpc.get_balance(&authority).await).unwrap_or(0)
+        (self.rpc.get_balance(&self.authority_pubkey()).await).unwrap_or(0)
     }
 
     #[tracing::instrument(skip(self))]
     pub async fn join_channel(&self, channel: &Pubkey) -> Result<Signature> {
-        let authority = self.authority.pubkey();
+        let authority = self.authority_pubkey();
         let membership = self.membership_pda(channel, &authority);
-
         let device = self.device_pda(&membership.0, &authority);
 
         let account_metas = vec![
@@ -89,7 +92,7 @@ impl MessengerClient {
 
     #[tracing::instrument(skip(self))]
     pub async fn read_message(&self, message_id: u64, channel: &Pubkey) -> Result<Signature> {
-        let authority = self.authority.pubkey();
+        let authority = self.authority_pubkey();
         let membership = self.membership_pda(channel, &authority);
 
         let account_metas = vec![
@@ -125,14 +128,14 @@ impl MessengerClient {
 
     #[tracing::instrument(skip(self))]
     pub async fn load_membership(&self, channel: &Pubkey) -> Result<ChannelMembership> {
-        let authority = &self.authority.pubkey();
+        let authority = &self.authority_pubkey();
         let pda = self.membership_pda(channel, authority);
         self.load_account(&pda.0).await
     }
 
     #[tracing::instrument(skip(self))]
     pub async fn load_device(&self, channel: &Pubkey) -> Result<ChannelDevice> {
-        let authority = &self.authority.pubkey();
+        let authority = &self.authority_pubkey();
         let membership_pda = self.membership_pda(channel, authority);
         let pda = self.device_pda(&membership_pda.0, authority);
         self.load_account(&pda.0).await

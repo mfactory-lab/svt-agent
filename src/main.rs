@@ -155,6 +155,7 @@ impl Agent {
     #[tracing::instrument(skip_all)]
     async fn run(&self) -> Result<()> {
         info!("Cluster {:?}", self.client.cluster);
+        info!("Agent ID {:?}", self.client.authority_pubkey().to_string());
         info!("Program ID {:?}", self.program_id);
         info!("Channel ID {:?}", self.channel_id);
 
@@ -195,6 +196,8 @@ impl Agent {
     #[tracing::instrument(skip_all)]
     async fn authorize(&self) -> Result<Vec<u8>> {
         let membership = self.client.load_membership(&self.channel_id).await;
+
+        check_min_balance(&self.client).await?;
 
         match membership {
             Ok(membership) => {
@@ -255,15 +258,15 @@ impl Agent {
 
             async move {
                 loop {
-                    let balance = client.get_balance().await;
-                    info!("Balance: {} lamports", balance);
-                    if balance < MIN_BALANCE_REQUIRED {
-                        info!(
-                            "Waiting positive balance (at least {} lamports)...",
-                            MIN_BALANCE_REQUIRED
-                        );
-                        time::sleep(Duration::from_millis(COMMAND_POLL_INTERVAL)).await;
-                        continue;
+                    match check_min_balance(&client).await {
+                        Ok(balance) => {
+                            info!("Balance: {} lamports", balance);
+                        }
+                        Err(e) => {
+                            warn!("{e}");
+                            time::sleep(Duration::from_millis(COMMAND_POLL_INTERVAL)).await;
+                            continue;
+                        }
                     }
 
                     let mut runner = runner.write().await;
@@ -374,6 +377,17 @@ impl Agent {
             }
         })
     }
+}
+
+async fn check_min_balance(client: &MessengerClient) -> Result<u64> {
+    let balance = client.get_balance().await;
+    if balance < MIN_BALANCE_REQUIRED {
+        return Err(Error::msg(format!(
+            "Insufficient balance! Required minimum {} lamports.",
+            MIN_BALANCE_REQUIRED
+        )));
+    }
+    Ok(balance)
 }
 
 #[tokio::test]

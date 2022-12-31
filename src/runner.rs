@@ -255,6 +255,12 @@ impl TaskRunner {
             // container is not exists...
         }
 
+        // let container = self.docker.containers().get("svt-agent");
+        // let res = container
+        //     .inspect()
+        //     .await
+        //     .expect("Failed to inspect container");
+
         let options = ContainerOptions::builder(ANSIBLE_IMAGE)
             .name(&self.container_name)
             .network_mode("host")
@@ -285,7 +291,7 @@ impl TaskRunner {
         info!("Starting task container...");
         if let Err(e) = container.start().await {
             // automatic delete container if is failed
-            container.delete().await?;
+            // container.delete().await?;
             error!("Error: {:?}", e);
             return Err(Error::from(e));
         }
