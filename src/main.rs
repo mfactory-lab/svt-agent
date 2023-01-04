@@ -159,6 +159,10 @@ impl Agent {
         info!("Program ID {:?}", self.program_id);
         info!("Channel ID {:?}", self.channel_id);
 
+        for (key, value) in std::env::vars() {
+            println!("ENV: {key}: {value}");
+        }
+
         self.init().await?;
 
         // Trying to access a channel
@@ -171,6 +175,8 @@ impl Agent {
                 }
             }
         };
+
+        // info!("CEK: {:?}", cek);
 
         // The channel that handle `NewMessageEvent` events
         let (sender, receiver) = mpsc::unbounded_channel::<NewMessageEvent>();

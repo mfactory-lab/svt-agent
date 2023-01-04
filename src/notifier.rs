@@ -46,7 +46,7 @@ impl<'a> Notifier<'a> {
     async fn notify(&self, event: &str) -> Result<()> {
         info!("Task#{} notify_{}", self.task.id, event);
 
-        // TODO: send influx state
+        self.notify_influx(event);
 
         if !self.webhook_url.is_empty() {
             let client = hyper::Client::new();
@@ -71,5 +71,10 @@ impl<'a> Notifier<'a> {
         }
 
         Ok(())
+    }
+
+    fn notify_influx(&self, event: &str) {
+        // ignore self.params['output']
+        // TODO:
     }
 }

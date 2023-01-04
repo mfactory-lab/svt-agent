@@ -3,8 +3,6 @@ pub const MESSENGER_PROGRAM_ID: &str = "4AnSBTc21f4wTBHmnFyarbosr28Qk4CgGFBHcRh4
 
 pub const DEFAULT_CHANNEL_ID: &str = "Bk1EAvKminEwHjyVhG2QA7sQeU1W3zPnFE6rTnLWDKYJ";
 
-// restart<!>a=1 b=2<!>secret123
-pub const COMMAND_DELIMITER: &str = "<!>";
 pub const COMMAND_POLL_INTERVAL: u64 = 5000;
 
 pub const WAIT_AUTHORIZATION_INTERVAL: u64 = 10000;
@@ -14,3 +12,5 @@ pub const MIN_BALANCE_REQUIRED: u64 = 5000;
 
 /// @link: https://hub.docker.com/r/willhallonline/ansible
 pub const ANSIBLE_IMAGE: &str = "willhallonline/ansible:alpine";
+
+pub const CONTAINER_NAME: &str = "svt-agent";

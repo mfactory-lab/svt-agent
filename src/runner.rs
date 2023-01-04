@@ -1,4 +1,4 @@
-use crate::constants::ANSIBLE_IMAGE;
+use crate::constants::{ANSIBLE_IMAGE, CONTAINER_NAME};
 use crate::monitor::{TaskMonitor, TaskMonitorOptions};
 use crate::notifier::Notifier;
 use anchor_lang::prelude::*;
@@ -25,12 +25,14 @@ const DEFAULT_WORKING_DIR: &str = "/app";
 pub struct Task {
     /// The numeric identifier of the [Task]
     pub id: u64,
-    /// Unique identifier, used as password for monitoring
-    pub uuid: String,
-    /// Ansible playbook name
-    pub playbook: String,
-    /// Variables added to the command in `--extra-vars`
-    pub extra_vars: String,
+    /// Task name (ansible playbook)
+    pub name: String,
+    /// Arguments of the task (ansible `--extra-vars`)
+    pub args: String,
+    /// Secret key, used as password for monitoring
+    pub secret: String,
+    ///
+    pub action: String,
 }
 
 #[derive(Debug, Clone, AnchorSerialize, AnchorDeserialize, Eq, PartialEq)]
@@ -157,7 +159,7 @@ impl TaskRunner {
                     let opts = TaskMonitorOptions::new()
                         .filter(&self.container_name)
                         .port(self.monitor_port)
-                        .password(&task.uuid);
+                        .password(&task.secret);
 
                     let mut monitor = TaskMonitor::new(&opts, &self.docker);
 
@@ -268,15 +270,17 @@ impl TaskRunner {
             // .auto_remove(true)
             // .tty(true)
             // .privileged(true)
-            .volumes(vec![
-                &format!("{}:/ansible:ro", self.working_dir.to_str().unwrap()),
-                "/root/.ssh/id_rsa:/root/.ssh/id_rsa:ro",
-                // "~/.ansible/roles:/root/.ansible/roles",
-            ])
+            // .volumes(vec![
+            //     &format!("{}:/ansible:ro", self.working_dir.to_str().unwrap()),
+            //     "/root/.ssh/id_rsa:/root/.ssh/id_rsa:ro",
+            //     // "~/.ansible/roles:/root/.ansible/roles",
+            // ])
+            .volumes_from(vec![CONTAINER_NAME])
+            .working_dir("/app/ansible")
             .cmd(vec![
                 "ansible-playbook",
-                &format!("./playbooks/{}.yml", task.playbook),
-                &format!("-e {}", task.extra_vars),
+                &format!("./playbooks/{}.yml", task.name),
+                &format!("-e {}", task.args),
                 // "-i 127.0.0.1,",
                 // "--connection=local",
                 // "-vvv",
@@ -387,9 +391,10 @@ mod tests {
 
         let task = Task {
             id: 0,
-            uuid: "".to_string(),
-            playbook: "test".to_string(),
-            extra_vars: "sleep=10".to_string(),
+            secret: "".to_string(),
+            name: "test".to_string(),
+            args: "sleep=10".to_string(),
+            action: "".to_string(),
         };
 
         runner.add_task(task);
