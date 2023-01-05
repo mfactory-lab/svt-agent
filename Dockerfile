@@ -14,6 +14,7 @@ COPY . .
 RUN cargo build --release
 
 FROM gcr.io/distroless/cc AS runtime
+#FROM debian:buster-slim AS runtime
 
 WORKDIR app
 
@@ -21,5 +22,6 @@ COPY --from=builder /app/target/release/svt-agent /usr/local/bin/svt-agent
 COPY ./ansible/ .
 
 ENV RUST_LOG=info
+ENV RUST_BACKTRACE=1
 
 ENTRYPOINT ["/usr/local/bin/svt-agent"]

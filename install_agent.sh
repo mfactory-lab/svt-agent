@@ -9,12 +9,13 @@
 #   sh -c "$(curl -sSfL https://svt.one/install-agent.sh)"
 #
 
-AGENT_VERSION="${AGENT_VERSION:-latest}"
+AGENT_RELEASE="${AGENT_RELEASE:-latest}"
 CLUSTER="${CLUSTER:-devnet}"
 CONTAINER_NAME="${CONTAINER_NAME:-svt-agent}"
 EXPOSE_PORT="${EXPOSE_PORT:-8888}" # Port is used to view task logs
 SSHKEY_PATH="$HOME/.ssh/svt-agent"
-KEYPAIR_PATH="$HOME/agent-keypair.json"
+WORKING_DIR="$HOME/svt-agent"
+KEYPAIR_PATH="$WORKING_DIR/authority.json"
 
 # ARE YOU ROOT (or sudo)?
 #if [[ $EUID -ne 0 ]]; then
@@ -41,22 +42,26 @@ do_install() {
     echo "Done"
   fi
 
+  if [ ! -d $WORKING_DIR ]; then
+    mkdir -p $WORKING_DIR
+  fi
+
   #say "Setup firewall..."
   #sudo ufw allow $EXPOSE_PORT/tcp
   #say "Done"
 
-  say "Downloading agent image (release: $AGENT_VERSION)..."
+  say "Downloading agent image (release: $AGENT_RELEASE)..."
 
-#  ensure docker pull ghcr.io/mfactory-lab/svt-agent:$AGENT_VERSION
-  docker stop $CONTAINER_NAME 2>/dev/null
-  docker container rm $CONTAINER_NAME 2>/dev/null
+#  ensure docker pull ghcr.io/mfactory-lab/svt-agent:$AGENT_RELEASE
+  docker stop $CONTAINER_NAME 2>/dev/null 1>/dev/null
+  docker container rm $CONTAINER_NAME 2>/dev/null 1>/dev/null
 
   # Generate agent keypair
   if [[ -f $KEYPAIR_PATH ]]; then
     say "Agent keypair already exits ($KEYPAIR_PATH)"
   else
     say "Generate new agent keypair... ($KEYPAIR_PATH)"
-    KEYPAIR="$(docker run --rm -it mfactory-lab/svt-agent:$AGENT_VERSION generate-keypair)"
+    KEYPAIR="$(docker run --rm -it mfactory-lab/svt-agent:$AGENT_RELEASE generate-keypair)"
     echo $KEYPAIR > $KEYPAIR_PATH
   fi
 
@@ -65,33 +70,36 @@ do_install() {
   fi
 
   # Run agent
-  docker run -d -it --restart=always --name $CONTAINER_NAME \
+  say "Starting docker container..."
+  CONTAINER_ID="$(docker run -d -it --restart=always --name $CONTAINER_NAME \
+    --hostname $CONTAINER_NAME \
     -v /var/run/docker.sock:/var/run/docker.sock \
+    -v svt-agent-ansible:/app/ansible \
     -v $SSHKEY_PATH:/root/.ssh \
     -v $KEYPAIR_PATH:/app/keypair.json \
     -p $EXPOSE_PORT:8888 \
-    mfactory-lab/svt-agent:$AGENT_VERSION \
+    mfactory-lab/svt-agent:$AGENT_RELEASE \
     run \
     --cluster $CLUSTER \
-    -c $CHANNEL_ID
+    -c $CHANNEL_ID)"
 
   say "Done"
 }
 
 generate_sshkey() {
   if [[ -f $SSHKEY_PATH/$@ ]]; then
-      say "Keyfile already exists - skipping"
+      say "SSH Keyfile already exists - skipping"
   else
       mkdir -p $SSHKEY_PATH
       ssh-keygen -t rsa -b 4096 -f $SSHKEY_PATH/$@ -q -N '' -C 'svt-agent'
       chmod 600 $SSHKEY_PATH/$@
       cat $SSHKEY_PATH/$@.pub >> ~/.ssh/authorized_keys
-      say "Keyfile was generated"
+      say "SSH Keyfile was generated"
   fi
 }
 
 is_valid_cluster() {
-  if [[ "$@" =~ ^(mainnet|devnet|testnet)$ ]]; then
+  if [[ "$@" =~ ^(mainnet-beta|devnet|testnet)$ ]]; then
     say "Cluster: $@"
   else
     err "Invalid cluster \"$@\""
