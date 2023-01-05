@@ -21,7 +21,7 @@ const MONITOR_START_TIMEOUT_MS: u64 = 2000;
 const DEFAULT_MONITOR_PORT: u16 = 8888;
 const DEFAULT_WORKING_DIR: &str = "/app";
 
-#[derive(Debug, Clone, AnchorSerialize, AnchorDeserialize, Eq, PartialEq)]
+#[derive(Debug, Default, Clone, AnchorSerialize, AnchorDeserialize, Eq, PartialEq)]
 pub struct Task {
     /// The numeric identifier of the [Task]
     pub id: u64,
