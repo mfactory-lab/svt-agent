@@ -233,16 +233,6 @@ impl TaskRunner {
         Ok(RunState::Pending)
     }
 
-    /// Clear the [queue]
-    pub fn clear(&mut self) {
-        self.queue.clear()
-    }
-
-    /// Add new [task] to the [queue]
-    pub fn add_task(&mut self, task: Task) {
-        self.queue.push_back(task);
-    }
-
     /// Run the [task] isolated through docker container
     #[tracing::instrument(skip_all)]
     async fn run_task(&self, task: &Task) -> Result<Container> {
@@ -305,6 +295,16 @@ impl TaskRunner {
         }
 
         Ok(container)
+    }
+
+    /// Add new [task] to the [queue]
+    pub fn add_task(&mut self, task: Task) {
+        self.queue.push_back(task);
+    }
+
+    /// Clear the [queue]
+    pub fn clear(&mut self) {
+        self.queue.clear()
     }
 
     pub fn reset_state(&self) -> Result<()> {
