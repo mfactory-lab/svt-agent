@@ -1,3 +1,5 @@
+use crate::constants::CONTAINER_NAME;
+use anyhow::Result;
 use shiplift::{Container, ContainerOptions, Docker};
 use tracing::info;
 
@@ -8,41 +10,6 @@ use tracing::info;
 const MONITOR_IMAGE: &str = "amir20/dozzle:latest";
 const DEFAULT_USERNAME: &str = "admin";
 const DEFAULT_HOST_PORT: u16 = 8888;
-const CONTAINER_NAME: &str = "svt-agent-monitor";
-
-#[derive(Default)]
-pub struct TaskMonitorOptions<'a> {
-    port: u16,
-    username: &'a str,
-    password: &'a str,
-    filter: &'a str,
-}
-
-impl<'a> TaskMonitorOptions<'a> {
-    pub fn new() -> Self {
-        Self {
-            filter: "",
-            password: "",
-            username: DEFAULT_USERNAME,
-            port: DEFAULT_HOST_PORT,
-        }
-    }
-
-    pub fn port(mut self, port: u16) -> Self {
-        self.port = port;
-        self
-    }
-
-    pub fn password(mut self, password: &'a str) -> Self {
-        self.password = password;
-        self
-    }
-
-    pub fn filter(mut self, filter: &'a str) -> Self {
-        self.filter = filter;
-        self
-    }
-}
 
 pub struct TaskMonitor<'a, 'b> {
     opts: &'a TaskMonitorOptions<'b>,
@@ -60,8 +27,9 @@ impl<'a, 'b> TaskMonitor<'a, 'b> {
     }
 
     #[tracing::instrument(skip(self))]
-    pub async fn start(&mut self) -> anyhow::Result<()> {
-        let container = self.docker.containers().get(CONTAINER_NAME);
+    pub async fn start(&mut self) -> Result<()> {
+        let container_name = format!("{}-monitor", CONTAINER_NAME);
+        let container = self.docker.containers().get(&container_name);
 
         // trying to stop and delete previously started container
         if (container.stop(None).await).is_ok() {
@@ -70,7 +38,7 @@ impl<'a, 'b> TaskMonitor<'a, 'b> {
         }
 
         let options = ContainerOptions::builder(MONITOR_IMAGE)
-            .name(CONTAINER_NAME)
+            .name(&container_name)
             .volumes(vec!["/var/run/docker.sock:/var/run/docker.sock"])
             .expose(8080, "tcp", self.opts.port as u32)
             .auto_remove(true)
@@ -115,6 +83,39 @@ impl<'a, 'b> TaskMonitor<'a, 'b> {
 
     pub fn is_started(&self) -> bool {
         self.container.is_some()
+    }
+}
+
+#[derive(Default)]
+pub struct TaskMonitorOptions<'a> {
+    port: u16,
+    username: &'a str,
+    password: &'a str,
+    filter: &'a str,
+}
+
+impl<'a> TaskMonitorOptions<'a> {
+    pub fn new() -> Self {
+        Self {
+            username: DEFAULT_USERNAME,
+            port: DEFAULT_HOST_PORT,
+            ..Default::default()
+        }
+    }
+
+    pub fn port(mut self, port: u16) -> Self {
+        self.port = port;
+        self
+    }
+
+    pub fn password(mut self, password: &'a str) -> Self {
+        self.password = password;
+        self
+    }
+
+    pub fn filter(mut self, filter: &'a str) -> Self {
+        self.filter = filter;
+        self
     }
 }
 

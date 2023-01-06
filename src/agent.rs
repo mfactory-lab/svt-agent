@@ -141,15 +141,18 @@ impl Agent {
         info!("Loading channel...");
         let channel = self.client.load_channel(&self.channel_id).await?;
         info!("Prepare commands...");
-        let mut commands = vec![];
+        let mut tasks = vec![];
         for message in channel.messages {
             if message.id > id_from {
-                if let Ok(cmd) = convert_message_to_task(message, cek) {
-                    commands.push(cmd);
+                if let Ok(task) = convert_message_to_task(message, cek) {
+                    // TODO: refactory
+                    if task.action != "skip" {
+                        tasks.push(task);
+                    }
                 }
             }
         }
-        Ok(commands)
+        Ok(tasks)
     }
 
     /// This method waits and runs commands from the runner queue at some interval.
@@ -169,42 +172,46 @@ impl Agent {
                         }
                         Err(e) => {
                             warn!("{e}");
-                            time::sleep(Duration::from_millis(COMMAND_POLL_INTERVAL)).await;
+                            time::sleep(Duration::from_millis(5000)).await;
                             continue;
                         }
                     }
 
                     let mut runner = runner.write().await;
 
-                    match runner.run().await {
-                        Ok(res) => match res {
-                            RunState::Complete(task_id) => {
-                                info!("Confirming Task#{}...", task_id);
-                                match client.read_message(task_id, &channel_id).await {
-                                    Ok(sig) => {
-                                        info!("Confirmed Task#{}! Signature: {}", task_id, sig);
-                                        // reset state only if the command is confirmed
-                                        runner.reset_state();
-                                    }
-                                    Err(e) => {
-                                        error!("ReadMessage Error: {}", e);
-                                    }
+                    // check previous task state
+                    match runner.current_state() {
+                        RunState::Processing(task) | RunState::Error(task) => {
+                            println!("... {:#?}", task);
+                            info!("Previous task was failed, wait for manual action...");
+                            time::sleep(Duration::from_millis(5000)).await;
+                        }
+                        // previous task was complete, try to confirm it
+                        RunState::Complete(task) => {
+                            info!("Confirming Task #{}...", task.id);
+                            match client.read_message(task.id, &channel_id).await {
+                                Ok(sig) => {
+                                    info!("Confirmed Task #{}! Signature: {}", task.id, sig);
+                                    // reset state only if the command is confirmed
+                                    runner.reset_state();
+                                }
+                                Err(e) => {
+                                    error!("Failed to confirm... Error: {}", e);
                                 }
                             }
-                            RunState::Error(_) => {
-                                // probably internal docker error
-                                // TODO: is it need to be confirmed ?
-                                runner.reset_state();
-                            }
-                            _ => {}
-                        },
-                        Err(e) => {
-                            error!("Error: {}", e)
                         }
-                    };
-
-                    info!("Waiting a command...");
-                    time::sleep(Duration::from_millis(COMMAND_POLL_INTERVAL)).await;
+                        RunState::Pending => match runner.run().await {
+                            Ok(s) => {
+                                if s == RunState::Pending {
+                                    info!("Waiting a command...");
+                                    time::sleep(Duration::from_millis(COMMAND_POLL_INTERVAL)).await;
+                                }
+                            }
+                            Err(e) => {
+                                error!("Error: {}", e)
+                            }
+                        },
+                    }
                 }
             }
         })

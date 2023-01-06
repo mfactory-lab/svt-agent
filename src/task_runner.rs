@@ -9,13 +9,12 @@ use shiplift::{Container, ContainerOptions, Docker, LogsOptions, PullOptions};
 use sled::Db;
 use std::collections::VecDeque;
 use std::path::PathBuf;
+use std::sync::Mutex;
 use std::time::Duration;
 use tokio::time;
 use tracing::info;
 use tracing::{error, warn};
 
-/// Used to filter containers by the monitor instance
-const TASK_CONTAINER_NAME: &str = "svt-agent-task";
 /// Prevent starting the monitoring when commands executes immediately
 const MONITOR_START_TIMEOUT_MS: u64 = 2000;
 const DEFAULT_MONITOR_PORT: u16 = 8888;
@@ -31,14 +30,15 @@ pub struct Task {
     pub args: String,
     /// Secret key, used as password for monitoring
     pub secret: String,
-    ///
+    /// Manual task action
     pub action: String,
 }
 
 #[derive(Debug, Clone, AnchorSerialize, AnchorDeserialize, Eq, PartialEq)]
 pub enum RunState {
-    Complete(u64),
-    Error(u64),
+    Processing(Task),
+    Complete(Task),
+    Error(Task),
     Pending,
 }
 
@@ -51,7 +51,7 @@ impl Default for RunState {
 pub struct TaskRunner {
     /// The [Task] queue
     queue: VecDeque<Task>,
-    state: RunState,
+    state: Mutex<RunState>,
     /// [Docker] instance (task running)
     docker: Docker,
     /// [Db] instance (state persistence)
@@ -60,6 +60,7 @@ pub struct TaskRunner {
     working_dir: PathBuf,
     monitor_port: u16,
     monitor_start_timeout_ms: u64,
+    /// The name of the container with witch the task is run
     container_name: String,
 }
 
@@ -68,11 +69,11 @@ impl TaskRunner {
         Self {
             queue: VecDeque::new(),
             docker: Docker::new(),
-            state: RunState::default(),
+            state: Mutex::new(RunState::default()),
             working_dir: PathBuf::from(DEFAULT_WORKING_DIR),
             monitor_start_timeout_ms: MONITOR_START_TIMEOUT_MS,
             monitor_port: DEFAULT_MONITOR_PORT,
-            container_name: TASK_CONTAINER_NAME.to_string(),
+            container_name: format!("{}-task", CONTAINER_NAME),
             db: None,
         }
     }
@@ -133,28 +134,26 @@ impl TaskRunner {
         Ok(())
     }
 
+    pub fn current_state(&self) -> RunState {
+        self.state.lock().unwrap().to_owned()
+    }
+
     /// Try to run the front task from the [queue] and start the monitor instance if needed.
     /// Return [Task] if container status code present
     #[tracing::instrument(skip_all)]
     pub async fn run(&mut self) -> Result<RunState> {
         self.ping().await?;
 
-        // if current state is complete or error, just return it
-        match &self.state {
-            RunState::Complete(_) | RunState::Error(_) => {
-                return Ok(self.state.clone());
-            }
-            _ => {}
-        }
-
         if let Some(task) = self.queue.pop_front() {
-            let mut notifier = Notifier::new(&task);
+            let mut notifier = Notifier::new(&task).with_logs_path(self.working_dir.join("logs"));
             let mut notify_error: Option<Error> = None;
             let mut status_code: Option<u64> = None;
 
             match self.run_task(&task).await {
                 Ok(container) => {
                     let _ = notifier.notify_start().await;
+
+                    self.set_state(RunState::Processing(task.clone()));
 
                     let opts = TaskMonitorOptions::new()
                         .filter(&self.container_name)
@@ -220,18 +219,23 @@ impl TaskRunner {
             }
 
             if let Some(e) = notify_error {
-                self.set_state(RunState::Error(task.id));
+                self.set_state(RunState::Error(task.clone()));
                 let _ = notifier.notify_error(&e).await;
                 return Err(e);
             }
 
             if status_code.is_some() {
-                self.set_state(RunState::Complete(task.id));
-                return Ok(self.state.clone());
+                self.set_state(RunState::Complete(task.clone()));
+                return Ok(self.current_state());
             }
         }
 
         Ok(RunState::Pending)
+    }
+
+    /// Clear the [queue]
+    pub fn clear(&mut self) {
+        self.queue.clear()
     }
 
     /// Add new [task] to the [queue]
@@ -303,13 +307,13 @@ impl TaskRunner {
         Ok(container)
     }
 
-    pub fn reset_state(&mut self) -> Result<()> {
+    pub fn reset_state(&self) -> Result<()> {
         self.set_state(RunState::default())
     }
 
-    fn set_state(&mut self, state: RunState) -> Result<()> {
-        info!("New state... {:?}", &state);
-        self.state = state;
+    fn set_state(&self, state: RunState) -> Result<()> {
+        info!("New state... {:?}", state);
+        *self.state.lock().unwrap() = state;
         self.sync_state()
     }
 
@@ -317,7 +321,7 @@ impl TaskRunner {
         if let Some(db) = &self.db {
             let bytes = db.get("runner_state")?;
             if let Some(bytes) = bytes {
-                self.state = RunState::try_from_slice(&bytes)?;
+                self.state = Mutex::new(RunState::try_from_slice(&bytes)?);
             }
         }
         Ok(())
@@ -325,7 +329,7 @@ impl TaskRunner {
 
     fn sync_state(&self) -> Result<()> {
         if let Some(db) = &self.db {
-            let bytes = self.state.try_to_vec()?;
+            let bytes = self.state.lock().unwrap().try_to_vec()?;
             db.insert("runner_state", bytes)?;
         }
         Ok(())

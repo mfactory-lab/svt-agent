@@ -95,6 +95,20 @@ pub struct NewMessageEvent {
     pub message: Message,
 }
 
+#[event]
+#[derive(Debug, Clone)]
+pub struct UpdateMessageEvent {
+    pub channel: Pubkey,
+    pub message: Message,
+}
+
+#[event]
+#[derive(Debug, Clone)]
+pub struct DeleteMessageEvent {
+    pub channel: Pubkey,
+    pub message: Message,
+}
+
 #[test]
 fn test_channel() {
     let mut data: &[u8] = &[
