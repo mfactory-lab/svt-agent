@@ -9,14 +9,27 @@ pub fn convert_message_to_task(msg: Message, cek: &[u8]) -> Result<Task> {
     let cmd = String::from_utf8(decrypt_message(msg.content, cek)?)?;
 
     if let Value::Object(obj) = serde_json::from_str(&cmd)? {
-        if !obj.contains_key("task") {
-            return Err(Error::msg("task required"));
-        }
+        let name = obj
+            .get("task")
+            .ok_or_else(|| Error::msg("Invalid task"))?
+            .as_str()
+            .unwrap()
+            .to_string();
 
-        let name = obj["task"].as_str().unwrap_or_default().to_string();
-        let args = obj["args"].as_str().unwrap_or_default().to_string();
-        let secret = obj["secret"].as_str().unwrap_or_default().to_string();
-        let action = obj["action"].as_str().unwrap_or_default().to_string();
+        let args = obj
+            .get("args")
+            .and_then(|v| v.as_str().map(|v| v.to_string()))
+            .unwrap_or_default();
+
+        let secret = obj
+            .get("secret")
+            .and_then(|v| v.as_str().map(|v| v.to_string()))
+            .unwrap_or_default();
+
+        let action = obj
+            .get("action")
+            .and_then(|v| v.as_str().map(|v| v.to_string()))
+            .unwrap_or_default();
 
         return Ok(Task {
             id: msg.id,
@@ -52,4 +65,20 @@ fn test() {
     assert_eq!(task.args, "a=1 b=2");
     assert_eq!(task.secret, "secret123");
     assert_eq!(task.action, "skip");
+
+    let task = convert_message_to_task(
+        Message {
+            id: 1,
+            sender: Default::default(),
+            created_at: 0,
+            flags: 1,
+            content: "5Pao+b7gUXFli77uhNwzjQZN4qA6PyYqra8ySFjTKDSUGGLkqBeUgKBSAqvkE5rLryKDHP9DPWjfRYu59Ge5J0IkgepJ6rAGI8HZdlnekmUIfjCo8ZrH/3eq/pHquCX1wB6d".to_string(),
+        },
+        cek,
+    ).unwrap();
+
+    assert_eq!(task.id, 1);
+    assert_eq!(task.name, "test");
+    assert_eq!(task.args, "sleep=60");
+    assert_eq!(task.secret, "secret123");
 }
