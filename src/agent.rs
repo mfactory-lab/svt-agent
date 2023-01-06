@@ -202,6 +202,7 @@ impl Agent {
                         }
                         RunState::Pending => match runner.run().await {
                             Ok(s) => {
+                                // State is not changed after run, wait a new command...
                                 if s == RunState::Pending {
                                     info!("Waiting a command...");
                                     time::sleep(Duration::from_millis(COMMAND_POLL_INTERVAL)).await;
