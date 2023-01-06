@@ -60,9 +60,9 @@ do_install() {
   if [[ -f $KEYPAIR_PATH ]]; then
     say "Agent keypair already exits ($KEYPAIR_PATH)"
   else
-    say "Generate new agent keypair... ($KEYPAIR_PATH)"
     KEYPAIR="$(docker run --rm -it mfactory-lab/svt-agent:$AGENT_RELEASE generate-keypair)"
     echo $KEYPAIR > $KEYPAIR_PATH
+    say "Added new agent keypair... ($KEYPAIR_PATH)"
   fi
 
   if [[ ! -f $KEYPAIR_PATH ]]; then
