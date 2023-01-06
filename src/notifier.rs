@@ -6,12 +6,15 @@ use chrono::Utc;
 use influxdb::{InfluxDbWriteable, Timestamp};
 use serde_json::json;
 use std::collections::HashMap;
-use tracing::info;
+use std::path::PathBuf;
+use tokio::fs::OpenOptions;
+use tokio::io::AsyncWriteExt;
+use tracing::{info, warn};
 
 pub struct Notifier<'a> {
     task: &'a Task,
     webhook_url: &'a str,
-    /// Data that will be send
+    logs_path: Option<PathBuf>,
     params: HashMap<&'a str, String>,
 }
 
@@ -20,12 +23,18 @@ impl<'a> Notifier<'a> {
         Self {
             task,
             webhook_url: Default::default(),
+            logs_path: None,
             params: HashMap::default(),
         }
     }
 
     pub fn with_webhook(mut self, url: &'a str) -> Self {
         self.webhook_url = url;
+        self
+    }
+
+    pub fn with_logs_path(mut self, path: PathBuf) -> Self {
+        self.logs_path = Some(path);
         self
     }
 
@@ -48,13 +57,47 @@ impl<'a> Notifier<'a> {
     }
 
     async fn notify(&self, event: &str) -> Result<()> {
-        info!("Task#{} notify_{}", self.task.id, event);
+        info!("Task #{} notify({})", self.task.id, event);
 
-        let (_, webhook_result) =
-            tokio::join!(self.notify_influx(event), self.notify_webhook(event));
+        let (save_result, influx_result, webhook_result) = tokio::join!(
+            self.save_to_file(),
+            self.notify_influx(event),
+            self.notify_webhook(event),
+        );
+
+        if let Err(e) = save_result {
+            warn!("[File] Error: {}", e);
+        }
+
+        if let Err(e) = influx_result {
+            warn!("[Influx] Error: {}", e);
+        }
 
         webhook_result?;
 
+        Ok(())
+    }
+
+    /// Try to save output to log file
+    async fn save_to_file(&self) -> Result<()> {
+        if let Some(path) = &self.logs_path {
+            if let Some(data) = self
+                .params
+                .get("output")
+                .or_else(|| self.params.get("error"))
+            {
+                let file_name = format!("{}_{}.log", self.task.id, Utc::now().format("%Y%m%d%H%M"));
+                let mut file = OpenOptions::new()
+                    .append(true)
+                    .create(true)
+                    .open(path.join(file_name))
+                    .await
+                    .expect("Unable to open log file");
+                file.write_all(data.as_bytes())
+                    .await
+                    .expect("Unable to write log data");
+            }
+        }
         Ok(())
     }
 
@@ -88,6 +131,11 @@ impl<'a> Notifier<'a> {
     async fn notify_influx<T: Into<String>>(&self, event: T) -> Result<()> {
         let client = {
             let url = std::env::var("AGENT_NOTIFY_INFLUX_URL").unwrap_or_default();
+
+            if url.is_empty() {
+                return Err(Error::msg("Influx url is required"));
+            }
+
             let db = std::env::var("AGENT_NOTIFY_INFLUX_DB")
                 .unwrap_or_else(|_| CONTAINER_NAME.to_string());
             let user = std::env::var("AGENT_NOTIFY_INFLUX_USER").unwrap_or_default();
