@@ -9,7 +9,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use tokio::fs::OpenOptions;
 use tokio::io::AsyncWriteExt;
-use tracing::{info, warn};
+use tracing::{error, info, warn};
 
 pub struct Notifier<'a> {
     task: &'a Task,
@@ -38,24 +38,22 @@ impl<'a> Notifier<'a> {
         self
     }
 
-    #[tracing::instrument(skip(self))]
     pub async fn notify_start(&self) -> Result<()> {
         self.notify("start").await
     }
 
-    #[tracing::instrument(skip(self))]
     pub async fn notify_finish(&mut self, status_code: u64, output: String) -> Result<()> {
         self.params.insert("status_code", status_code.to_string());
         self.params.insert("output", output);
         self.notify("finish").await
     }
 
-    #[tracing::instrument(skip(self))]
     pub async fn notify_error(&mut self, error: &'a Error) -> Result<()> {
         self.params.insert("error", error.to_string());
         self.notify("error").await
     }
 
+    #[tracing::instrument(skip_all)]
     async fn notify(&self, event: &str) -> Result<()> {
         info!("Task #{} notify({})", self.task.id, event);
 
@@ -79,6 +77,7 @@ impl<'a> Notifier<'a> {
     }
 
     /// Try to save output to log file
+    #[tracing::instrument(skip_all)]
     async fn save_to_file(&self) -> Result<()> {
         if let Some(path) = &self.logs_path {
             if let Some(data) = self
@@ -87,21 +86,35 @@ impl<'a> Notifier<'a> {
                 .or_else(|| self.params.get("error"))
             {
                 let file_name = format!("{}_{}.log", self.task.id, Utc::now().format("%Y%m%d%H%M"));
-                let mut file = OpenOptions::new()
+
+                let path = path.join(&file_name);
+
+                match OpenOptions::new()
                     .append(true)
                     .create(true)
-                    .open(path.join(file_name))
+                    .open(&path)
                     .await
-                    .expect("Unable to open log file");
-                file.write_all(data.as_bytes())
-                    .await
-                    .expect("Unable to write log data");
+                {
+                    Ok(mut file) => {
+                        if let Err(e) = file.write_all(data.as_bytes()).await {
+                            error!("Unable to write log data. {}", e);
+                        }
+                    }
+                    Err(e) => {
+                        error!(
+                            "Unable to open log file ({}). {}",
+                            path.to_str().unwrap_or("?"),
+                            e
+                        );
+                    }
+                }
             }
         }
         Ok(())
     }
 
     /// Send notification to custom url
+    #[tracing::instrument(skip_all)]
     async fn notify_webhook<T: Into<String>>(&self, event: T) -> Result<()> {
         if !self.webhook_url.is_empty() {
             let client = hyper::Client::new();
@@ -128,12 +141,13 @@ impl<'a> Notifier<'a> {
     }
 
     /// Send notification to the influx
+    #[tracing::instrument(skip_all)]
     async fn notify_influx<T: Into<String>>(&self, event: T) -> Result<()> {
         let client = {
             let url = std::env::var("AGENT_NOTIFY_INFLUX_URL").unwrap_or_default();
 
             if url.is_empty() {
-                return Err(Error::msg("Influx url is required"));
+                return Err(Error::msg("[Influx] url is not specified"));
             }
 
             let db = std::env::var("AGENT_NOTIFY_INFLUX_DB")

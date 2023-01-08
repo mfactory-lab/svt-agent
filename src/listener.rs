@@ -1,4 +1,4 @@
-use anchor_client::solana_client::nonblocking::pubsub_client::PubsubClient;
+use anchor_client::solana_client::nonblocking::pubsub_client::{PubsubClient, PubsubClientResult};
 use anchor_client::solana_client::rpc_config::{
     RpcTransactionLogsConfig, RpcTransactionLogsFilter,
 };
@@ -9,9 +9,10 @@ use anchor_client::ClientError;
 use anchor_lang::AnchorDeserialize;
 use anchor_lang::Event;
 use anyhow::Result;
-use futures::StreamExt;
+use futures::future::BoxFuture;
+use futures::stream::BoxStream;
 use regex::Regex;
-use tracing::{error, info};
+use tracing::info;
 
 /// Listen to events in the blockchain through program logs
 /// The event is the serialized data in the "Program data:" section.
@@ -40,28 +41,40 @@ impl<'a> Listener<'a> {
         }
     }
 
-    pub async fn on<T: Event>(&self, cb: impl Fn(T)) -> Result<()> {
-        let (mut stream, _unsubscribe) = self
-            .client
+    pub async fn log_stream(
+        &self,
+    ) -> PubsubClientResult<(
+        BoxStream<'_, Response<RpcLogsResponse>>,
+        Box<dyn FnOnce() -> BoxFuture<'static, ()> + Send>,
+    )> {
+        self.client
             .logs_subscribe(self.filter.clone(), self.config.clone())
-            .await?;
-
-        while let Some(log) = stream.next().await {
-            match self.handle_event::<T>(&log, &cb) {
-                Ok(_) => {}
-                Err(e) => {
-                    error!("Error: {}", e);
-                }
-            }
-        }
-
-        info!("Unsubscribing...");
-        // FnOnce::call_once(unsubscribe, ());
-
-        Ok(())
+            .await
     }
 
-    fn handle_event<T>(&self, log: &Response<RpcLogsResponse>, cb: &impl Fn(T)) -> Result<()>
+    // TODO: find a better way to handle many events in single method
+    // pub async fn on<T: Event>(&self, cb: impl Fn(T)) -> Result<()> {
+    //     let (mut stream, _unsubscribe) = self
+    //         .client
+    //         .logs_subscribe(self.filter.clone(), self.config.clone())
+    //         .await?;
+    //
+    //     while let Some(log) = stream.next().await {
+    //         match self.handle_event::<T>(&log, &cb) {
+    //             Ok(_) => {}
+    //             Err(e) => {
+    //                 error!("Error: {}", e);
+    //             }
+    //         }
+    //     }
+    //
+    //     info!("Unsubscribing...");
+    //     // FnOnce::call_once(unsubscribe, ());
+    //
+    //     Ok(())
+    // }
+
+    pub fn on<T>(&self, log: &Response<RpcLogsResponse>, cb: &impl Fn(T)) -> Result<()>
     where
         T: Event,
     {

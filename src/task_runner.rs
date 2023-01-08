@@ -34,6 +34,12 @@ pub struct Task {
     pub action: String,
 }
 
+impl Task {
+    pub fn is_skipped(&self) -> bool {
+        self.action == "skip"
+    }
+}
+
 #[derive(Debug, Clone, AnchorSerialize, AnchorDeserialize, Eq, PartialEq)]
 pub enum RunState {
     Processing(Task),
@@ -146,14 +152,15 @@ impl TaskRunner {
 
         if let Some(task) = self.queue.pop_front() {
             let mut notifier = Notifier::new(&task).with_logs_path(self.working_dir.join("logs"));
-            let mut notify_error: Option<Error> = None;
+            // probably docker error
+            let mut internal_error: Option<Error> = None;
             let mut status_code: Option<u64> = None;
 
             match self.run_task(&task).await {
                 Ok(container) => {
                     let _ = notifier.notify_start().await;
 
-                    self.set_state(RunState::Processing(task.clone()));
+                    let _ = self.set_state(RunState::Processing(task.clone()));
 
                     let opts = TaskMonitorOptions::new()
                         .filter(&self.container_name)
@@ -174,7 +181,7 @@ impl TaskRunner {
                                         status_code = Some(exit.status_code);
                                         info!("Task finished (status code: {})...", exit.status_code);
                                     },
-                                    Err(e) => notify_error = Some(Error::from(e))
+                                    Err(e) => internal_error = Some(Error::from(e))
                                 }
                                 break;
                             }
@@ -188,7 +195,7 @@ impl TaskRunner {
                         }
                     }
 
-                    // retrieve logs only if status code is present
+                    // retrieve task output only if status code is present
                     if let Some(status_code) = status_code {
                         let output = get_container_logs(
                             &container,
@@ -214,18 +221,22 @@ impl TaskRunner {
                 }
                 Err(e) => {
                     error!("Failed to run task. {:?}", e);
-                    notify_error = Some(e);
+                    internal_error = Some(e);
                 }
             }
 
-            if let Some(e) = notify_error {
-                self.set_state(RunState::Error(task.clone()));
+            if let Some(e) = internal_error {
+                let _ = self.set_state(RunState::Error(task.clone()));
                 let _ = notifier.notify_error(&e).await;
                 return Err(e);
             }
 
-            if status_code.is_some() {
-                self.set_state(RunState::Complete(task.clone()));
+            if let Some(code) = status_code {
+                let _ = self.set_state(if code == 0 {
+                    RunState::Complete(task.clone())
+                } else {
+                    RunState::Error(task.clone())
+                });
                 return Ok(self.current_state());
             }
         }
@@ -264,6 +275,7 @@ impl TaskRunner {
             // .auto_remove(true)
             // .tty(true)
             // .privileged(true)
+            // for local tests...
             // .volumes(vec![
             //     &format!("{}:/ansible:ro", self.working_dir.to_str().unwrap()),
             //     "/root/.ssh/id_rsa:/root/.ssh/id_rsa:ro",
