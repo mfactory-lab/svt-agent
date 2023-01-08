@@ -131,7 +131,9 @@ impl Agent {
             }
             Err(e) => {
                 error!("Error: {}", e);
-                self.client.join_channel(&self.channel_id).await?;
+                self.client
+                    .join_channel(&self.channel_id, Some(AGENT_NAME.to_string()))
+                    .await?;
                 Err(e)
             }
         }

@@ -1,5 +1,5 @@
 use crate::encryption::decrypt_message;
-use crate::state::Message;
+use crate::messenger::Message;
 use crate::task_runner::Task;
 use anyhow::Error;
 use anyhow::Result;

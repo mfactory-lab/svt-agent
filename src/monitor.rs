@@ -29,13 +29,11 @@ impl<'a, 'b> TaskMonitor<'a, 'b> {
     #[tracing::instrument(skip(self))]
     pub async fn start(&mut self) -> Result<()> {
         let container_name = format!("{}-monitor", CONTAINER_NAME);
+
         let container = self.docker.containers().get(&container_name);
 
-        // trying to stop and delete previously started container
-        if (container.stop(None).await).is_ok() {
-            container.delete().await?;
-            info!("Deleted existing container...");
-        }
+        // trying to stop previously started container
+        let _ = container.stop(None).await;
 
         let options = ContainerOptions::builder(MONITOR_IMAGE)
             .name(&container_name)
@@ -60,7 +58,7 @@ impl<'a, 'b> TaskMonitor<'a, 'b> {
         let info = self.docker.containers().create(&options).await?;
         info!("Monitor container was created ({:?})", info);
 
-        let container = self.docker.containers().get(&info.id);
+        // let container = self.docker.containers().get(&info.id);
         container.start().await?;
         info!("Monitor was started...");
 
@@ -70,7 +68,7 @@ impl<'a, 'b> TaskMonitor<'a, 'b> {
     }
 
     #[tracing::instrument(skip(self))]
-    pub async fn stop(&mut self) -> anyhow::Result<()> {
+    pub async fn stop(&mut self) -> Result<()> {
         if let Some(container) = &self.container {
             info!("Stopping monitoring...");
             container.stop(None).await?;
@@ -123,11 +121,11 @@ impl<'a> TaskMonitorOptions<'a> {
 async fn test_monitor() {
     let docker = Docker::new();
 
-    let opts = TaskMonitorOptions::new()
-        .filter("monitor")
-        .password("admin");
+    let opts = TaskMonitorOptions::new().filter("monitor");
 
     let mut monitor = TaskMonitor::new(&opts, &docker);
 
-    monitor.start().await;
+    let r = monitor.start().await;
+
+    println!("{:?}", r);
 }

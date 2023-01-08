@@ -16,7 +16,7 @@ use anchor_client::solana_sdk::signature::Keypair;
 use anchor_client::Cluster;
 use anyhow::Result;
 use clap::{Args, Parser, Subcommand};
-use messenger::{Channel, MessengerClient};
+use messenger::MessengerClient;
 use rand::rngs::OsRng;
 use std::path::PathBuf;
 use tracing_subscriber::layer::SubscriberExt;

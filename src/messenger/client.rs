@@ -13,9 +13,6 @@ use anchor_lang::prelude::*;
 use anyhow::Result;
 use tracing::info;
 
-/// Display name in the channel
-const AGENT_NAME: &str = "agent";
-
 pub struct MessengerClient {
     pub program_id: Pubkey,
     pub rpc: RpcClient,
@@ -49,7 +46,7 @@ impl MessengerClient {
     }
 
     #[tracing::instrument(skip(self))]
-    pub async fn join_channel(&self, channel: &Pubkey) -> Result<Signature> {
+    pub async fn join_channel(&self, channel: &Pubkey, name: Option<String>) -> Result<Signature> {
         let authority = self.authority_pubkey();
         let membership = self.membership_pda(channel, &authority);
         let device = self.device_pda(&membership.0, &authority);
@@ -70,7 +67,7 @@ impl MessengerClient {
 
         JoinChannelData::serialize(
             &JoinChannelData {
-                name: AGENT_NAME.to_string(),
+                name: name.unwrap_or_default(),
                 authority: None,
             },
             &mut data,

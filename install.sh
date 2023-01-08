@@ -81,8 +81,9 @@ do_install() {
     mfactory-lab/svt-agent:$AGENT_RELEASE \
     run \
     --cluster $CLUSTER \
-    -c $CHANNEL_ID)"
+    --channel-id $CHANNEL_ID)"
 
+  say "Container ID: $CONTAINER_ID"
   say "Done"
 }
 
