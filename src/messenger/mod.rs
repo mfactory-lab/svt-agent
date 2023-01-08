@@ -1,5 +1,5 @@
-mod messenger_client;
+mod client;
 mod state;
 
-pub use messenger_client::*;
+pub use client::*;
 pub use state::*;
