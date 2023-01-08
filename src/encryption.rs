@@ -1,4 +1,4 @@
-use crate::state::CEKData;
+use crate::messenger::CEKData;
 use anchor_lang::__private::base64;
 use anyhow::Result;
 use chacha20poly1305::aead::{Aead, NewAead, Payload};

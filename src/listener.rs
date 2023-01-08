@@ -82,9 +82,9 @@ impl<'a> Listener<'a> {
         let self_program_str = self.program_id.to_string();
 
         if !logs.is_empty() {
-            info!("Try to parse logs...");
+            // info!("Try to parse logs...");
             if let Ok(mut execution) = Execution::new(&mut logs) {
-                info!("{} logs found...", logs.len());
+                // info!("{} logs found...", logs.len());
                 for l in logs {
                     // Parse the log.
                     let (event, new_program, did_pop) = {

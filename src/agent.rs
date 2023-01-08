@@ -1,8 +1,8 @@
 use crate::constants::*;
 use crate::listener::Listener;
-use crate::state::*;
+use crate::messenger::*;
 use crate::task_runner::{RunState, Task, TaskRunner};
-use crate::utils::{convert_message_to_task, MessengerClient};
+use crate::utils::convert_message_to_task;
 use crate::RunArgs;
 
 use anchor_client::solana_client::nonblocking::pubsub_client::PubsubClient;
@@ -262,7 +262,9 @@ impl Agent {
                         Some(e) = new_receiver.recv() => {
                             match convert_message_to_task(e.message, cek.as_slice()) {
                                 Ok(task) => {
-                                    runner.write().await.add_task(task);
+                                    if !task.is_skipped() {
+                                        runner.write().await.add_task(task);
+                                    }
                                 }
                                 Err(_) => {
                                     info!("Failed to convert message to task");

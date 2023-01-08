@@ -2,21 +2,21 @@ mod agent;
 mod constants;
 mod encryption;
 mod listener;
+mod messenger;
 mod monitor;
 mod notifier;
-mod state;
 mod task_runner;
 mod utils;
 
 use crate::agent::Agent;
 use crate::constants::*;
-use crate::utils::MessengerClient;
 
 use anchor_client::solana_sdk::pubkey::Pubkey;
 use anchor_client::solana_sdk::signature::Keypair;
 use anchor_client::Cluster;
 use anyhow::Result;
 use clap::{Args, Parser, Subcommand};
+use messenger::{Channel, MessengerClient};
 use rand::rngs::OsRng;
 use std::path::PathBuf;
 use tracing_subscriber::layer::SubscriberExt;
