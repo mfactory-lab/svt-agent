@@ -44,11 +44,11 @@ enum Commands {
         #[arg(short, long, value_name = "MESSENGER_PROGRAM", default_value = MESSENGER_PROGRAM_ID)]
         program_id: Pubkey,
     },
-    Run(RunArgs),
+    Run(AgentArgs),
 }
 
-#[derive(Args, Debug)]
-pub struct RunArgs {
+#[derive(Args, Debug, Default)]
+pub struct AgentArgs {
     #[arg(
         long,
         short,
@@ -70,6 +70,13 @@ pub struct RunArgs {
     pub program_id: Pubkey,
     #[arg(short, long, value_name = "WORKING_DIR")]
     pub working_dir: Option<PathBuf>,
+    #[arg(
+        long,
+        value_name = "MONITOR_PORT",
+        env = "AGENT_MONITOR_PORT",
+        default_value = DEFAULT_MONITOR_PORT
+    )]
+    pub monitor_port: u16,
 }
 
 #[tokio::main(flavor = "current_thread")]

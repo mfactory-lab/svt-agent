@@ -17,7 +17,6 @@ use tracing::{error, warn};
 
 /// Prevent starting the monitoring when commands executes immediately
 const MONITOR_START_TIMEOUT_MS: u64 = 2000;
-const DEFAULT_MONITOR_PORT: u16 = 8888;
 const DEFAULT_WORKING_DIR: &str = "/app";
 
 #[derive(Debug, Default, Clone, AnchorSerialize, AnchorDeserialize, Eq, PartialEq)]
@@ -72,13 +71,18 @@ pub struct TaskRunner {
 
 impl TaskRunner {
     pub fn new() -> Self {
+        let monitor_port = std::env::var("AGENT_MONITOR_PORT")
+            .unwrap_or_default()
+            .parse::<u16>()
+            .unwrap_or(DEFAULT_MONITOR_PORT);
+
         Self {
             queue: VecDeque::new(),
             docker: Docker::new(),
             state: Mutex::new(RunState::default()),
             working_dir: PathBuf::from(DEFAULT_WORKING_DIR),
             monitor_start_timeout_ms: MONITOR_START_TIMEOUT_MS,
-            monitor_port: DEFAULT_MONITOR_PORT,
+            monitor_port,
             container_name: format!("{}-task", CONTAINER_NAME),
             db: None,
         }
@@ -163,7 +167,7 @@ impl TaskRunner {
                     let _ = self.set_state(RunState::Processing(task.clone()));
 
                     let opts = TaskMonitorOptions::new()
-                        .filter(&self.container_name)
+                        .filter(self.container_name.as_ref())
                         .port(self.monitor_port)
                         .password(&task.secret);
 
@@ -375,11 +379,15 @@ async fn get_container_logs(container: &Container<'_>, mode: u8) -> String {
                     if mode & ContainerLogFlags::StdOut == 1 {
                         res.push_str(std::str::from_utf8(&bytes).unwrap());
                     }
+
+                    info!("StdOut: {}", std::str::from_utf8(&bytes).unwrap());
                 }
                 TtyChunk::StdErr(bytes) => {
                     if mode & ContainerLogFlags::StdErr == 2 {
                         res.push_str(std::str::from_utf8(&bytes).unwrap());
                     }
+
+                    info!("StdErr: {}", std::str::from_utf8(&bytes).unwrap());
                 }
                 _ => {}
             },

@@ -3,11 +3,10 @@ use crate::listener::Listener;
 use crate::messenger::*;
 use crate::task_runner::{RunState, Task, TaskRunner};
 use crate::utils::convert_message_to_task;
-use crate::RunArgs;
+use crate::AgentArgs;
 
 use anchor_client::solana_client::nonblocking::pubsub_client::PubsubClient;
 use anchor_client::solana_client::rpc_config::RpcTransactionLogsFilter;
-use anchor_client::solana_sdk::pubkey::Pubkey;
 use anchor_client::solana_sdk::signature::read_keypair_file;
 
 use anyhow::{Error, Result};
@@ -19,25 +18,21 @@ use tokio::task::JoinHandle;
 use tokio::time;
 use tracing::{error, info, warn};
 
-pub struct Agent {
-    /// Messenger program id
-    program_id: Pubkey,
-    /// The [Channel] identifier
-    channel_id: Pubkey,
+pub struct Agent<'a> {
+    args: &'a AgentArgs,
     /// Messenger client instance
     client: Arc<MessengerClient>,
     /// Task runner instance
     runner: Arc<RwLock<TaskRunner>>,
 }
 
-impl Agent {
+impl<'a> Agent<'_> {
     #[tracing::instrument]
-    pub fn new(args: &RunArgs) -> Result<Self> {
+    pub fn new(args: &AgentArgs) -> Result<Self> {
         let keypair = read_keypair_file(&args.keypair).expect("Authority keypair file not found");
-        let program_id = args.program_id;
-        let channel_id = args.channel_id;
 
         let mut runner = TaskRunner::new();
+        runner.with_monitor_port(args.monitor_port);
 
         if let Some(working_dir) = &args.working_dir {
             runner.with_working_dir(working_dir.into());
@@ -50,10 +45,9 @@ impl Agent {
         ));
 
         Ok(Self {
-            program_id,
-            channel_id,
-            runner: Arc::new(RwLock::new(runner)),
+            args,
             client,
+            runner: Arc::new(RwLock::new(runner)),
         })
     }
 
@@ -61,8 +55,8 @@ impl Agent {
     pub async fn run(&self) -> Result<()> {
         info!("Cluster: {:?}", self.client.cluster);
         info!("Agent ID: {:?}", self.client.authority_pubkey().to_string());
-        info!("Program ID: {:?}", self.program_id);
-        info!("Channel ID: {:?}", self.channel_id);
+        info!("Program ID: {:?}", self.args.program_id);
+        info!("Channel ID: {:?}", self.args.channel_id);
 
         self.init().await?;
 
@@ -103,14 +97,14 @@ impl Agent {
     /// If membership status is authorized, try to load [ChannelDevice] and return the `CEK`.
     #[tracing::instrument(skip_all)]
     async fn authorize(&self) -> Result<Vec<u8>> {
-        let membership = self.client.load_membership(&self.channel_id).await;
+        let membership = self.client.load_membership(&self.args.channel_id).await;
 
         check_balance(&self.client).await?;
 
         match membership {
             Ok(membership) => {
                 if membership.status == ChannelMembershipStatus::Authorized {
-                    let cek = self.client.load_cek(&self.channel_id).await?;
+                    let cek = self.client.load_cek(&self.args.channel_id).await?;
 
                     let initial_commands = self
                         .load_commands(cek.as_slice(), membership.last_read_message_id)
@@ -132,7 +126,7 @@ impl Agent {
             Err(e) => {
                 error!("Error: {}", e);
                 self.client
-                    .join_channel(&self.channel_id, Some(AGENT_NAME.to_string()))
+                    .join_channel(&self.args.channel_id, Some(AGENT_NAME.to_string()))
                     .await?;
                 Err(e)
             }
@@ -144,7 +138,7 @@ impl Agent {
     #[tracing::instrument(skip(self, cek))]
     async fn load_commands(&self, cek: &[u8], id_from: u64) -> Result<Vec<Task>> {
         info!("Loading channel...");
-        let channel = self.client.load_channel(&self.channel_id).await?;
+        let channel = self.client.load_channel(&self.args.channel_id).await?;
 
         info!("Prepare commands...");
 
@@ -187,7 +181,7 @@ impl Agent {
         tokio::spawn({
             let runner = self.runner.clone();
             let client = self.client.clone();
-            let channel_id = self.channel_id;
+            let channel_id = self.args.channel_id;
 
             async move {
                 loop {
@@ -313,8 +307,8 @@ impl Agent {
     ) -> JoinHandle<()> {
         tokio::spawn({
             let url = self.client.cluster.ws_url().to_owned();
-            let program_id = self.program_id;
-            let filter = RpcTransactionLogsFilter::Mentions(vec![self.channel_id.to_string()]);
+            let program_id = self.args.program_id;
+            let filter = RpcTransactionLogsFilter::Mentions(vec![self.args.channel_id.to_string()]);
 
             async move {
                 loop {
@@ -396,12 +390,12 @@ mod test {
     async fn test_agent_init() {
         let keypair = PathBuf::from("./keypair.json");
 
-        let agent = Agent::new(&RunArgs {
+        let agent = Agent::new(&AgentArgs {
             keypair,
             cluster: Cluster::Devnet,
             channel_id: DEFAULT_CHANNEL_ID.parse().unwrap(),
             program_id: MESSENGER_PROGRAM_ID.parse().unwrap(),
-            working_dir: None,
+            ..Default::default()
         })
         .unwrap();
 

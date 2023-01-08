@@ -18,3 +18,5 @@ pub const CONTAINER_NAME: &str = "svt-agent";
 
 /// Display name in the channel
 pub const AGENT_NAME: &str = "agent";
+
+pub const DEFAULT_MONITOR_PORT: &str = "8888";
