@@ -12,7 +12,6 @@
 AGENT_RELEASE="${AGENT_RELEASE:-latest}"
 CLUSTER="${CLUSTER:-devnet}"
 CONTAINER_NAME="${CONTAINER_NAME:-svt-agent}"
-EXPOSE_PORT="${EXPOSE_PORT:-8888}" # Port is used to view task logs
 SSHKEY_PATH="$HOME/.ssh/svt-agent"
 WORKING_DIR="$HOME/svt-agent"
 KEYPAIR_PATH="$WORKING_DIR/authority.json"
@@ -77,7 +76,6 @@ do_install() {
     -v svt-agent-ansible:/app/ansible \
     -v $SSHKEY_PATH:/root/.ssh \
     -v $KEYPAIR_PATH:/app/keypair.json \
-    -p $EXPOSE_PORT:8888 \
     mfactory-lab/svt-agent:$AGENT_RELEASE \
     run \
     --cluster $CLUSTER \
