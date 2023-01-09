@@ -14,7 +14,7 @@ CHANNEL_ID=... CLUSTER=devnet sh -c "$(curl -sSfL https://svt.one/install-agent.
 # Configuration
 
 Env
-`
+```shell
 AGENT_KEYPAIR = "/app/keypair.json"
 AGENT_CLUSTER = "devnet"
 AGENT_CHANNEL_ID = "..."
@@ -25,7 +25,7 @@ AGENT_NOTIFY_INFLUX_URL = "https://..."
 AGENT_NOTIFY_INFLUX_DB = "svt-agent"
 AGENT_NOTIFY_INFLUX_USER = ""
 AGENT_NOTIFY_INFLUX_PASSWORD = ""
-`
+```
 
 # Features
 - Secure validator management

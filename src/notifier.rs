@@ -147,7 +147,7 @@ impl<'a> Notifier<'a> {
             let url = std::env::var("AGENT_NOTIFY_INFLUX_URL").unwrap_or_default();
 
             if url.is_empty() {
-                return Err(Error::msg("[Influx] url is not specified"));
+                return Err(Error::msg("url is not specified"));
             }
 
             let db = std::env::var("AGENT_NOTIFY_INFLUX_DB")
