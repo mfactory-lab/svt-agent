@@ -1,10 +1,9 @@
 name: Security audit
 
-#on:
+on:
+  workflow_dispatch:
 #  schedule:
 #    - cron: '0 0 * * *'
-
-#on:
 #  push:
 #    paths:
 #      - '**/Cargo.toml'
