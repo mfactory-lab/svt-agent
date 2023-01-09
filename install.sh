@@ -14,13 +14,13 @@ CLUSTER="${CLUSTER:-devnet}"
 CONTAINER_NAME="${CONTAINER_NAME:-svt-agent}"
 SSHKEY_PATH="$HOME/.ssh/svt-agent"
 WORKING_DIR="$HOME/svt-agent"
-KEYPAIR_PATH="$WORKING_DIR/authority.json"
+KEYPAIR_PATH="$WORKING_DIR/keypair.json"
 
 # ARE YOU ROOT (or sudo)?
-#if [[ $EUID -ne 0 ]]; then
-#	echo -e "ERROR: This script must be run as root"
-#	exit 1
-#fi
+if [[ $EUID -ne 0 ]]; then
+	echo -e "ERROR: This script must be run as root"
+	exit 1
+fi
 
 do_install() {
   echo "Installing SVT Agent..."
@@ -50,7 +50,7 @@ do_install() {
 
   say "Downloading agent image (release: $AGENT_RELEASE)..."
 
-#  ensure docker pull ghcr.io/mfactory-lab/svt-agent:$AGENT_RELEASE
+  ensure docker pull ghcr.io/mfactory-lab/svt-agent:$AGENT_RELEASE
   docker stop $CONTAINER_NAME 2>/dev/null 1>/dev/null
   docker container rm $CONTAINER_NAME 2>/dev/null 1>/dev/null
 
