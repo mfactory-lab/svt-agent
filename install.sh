@@ -76,7 +76,7 @@ do_install() {
     -v svt-agent-ansible:/app/ansible \
     -v $SSHKEY_PATH:/root/.ssh \
     -v $KEYPAIR_PATH:/app/keypair.json \
-    -v $WORKING_DIR/logs:/logs \
+    -v $WORKING_DIR/logs:/app/logs \
     $IMAGE_NAME:$AGENT_RELEASE \
     run \
     --cluster $CLUSTER \
