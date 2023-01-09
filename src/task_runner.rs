@@ -136,6 +136,9 @@ impl TaskRunner {
             }
         }
 
+        // Setup monitoring
+        TaskMonitor::init(&self.docker).await?;
+
         Ok(())
     }
 

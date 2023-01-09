@@ -1,11 +1,9 @@
 use crate::constants::CONTAINER_NAME;
+use anyhow::Error;
 use anyhow::Result;
-use shiplift::{Container, ContainerOptions, Docker};
+use futures::StreamExt;
+use shiplift::{Container, ContainerOptions, Docker, PullOptions};
 use tracing::info;
-
-///
-/// Think about web endpoint with `docker logs` output
-///
 
 const MONITOR_IMAGE: &str = "amir20/dozzle:latest";
 const DEFAULT_USERNAME: &str = "admin";
@@ -26,7 +24,26 @@ impl<'a, 'b> TaskMonitor<'a, 'b> {
         }
     }
 
-    #[tracing::instrument(skip(self))]
+    #[tracing::instrument(skip_all)]
+    pub async fn init(docker: &Docker) -> Result<()> {
+        let mut stream = docker
+            .images()
+            .pull(&PullOptions::builder().image(MONITOR_IMAGE).build());
+
+        while let Some(pull_result) = stream.next().await {
+            match pull_result {
+                Ok(output) => info!("{:?}", output),
+                Err(e) => {
+                    info!("Error: {}", e);
+                    return Err(Error::from(e));
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    #[tracing::instrument(skip_all)]
     pub async fn start(&mut self) -> Result<()> {
         let container_name = format!("{}-monitor", CONTAINER_NAME);
 
@@ -67,7 +84,7 @@ impl<'a, 'b> TaskMonitor<'a, 'b> {
         Ok(())
     }
 
-    #[tracing::instrument(skip(self))]
+    #[tracing::instrument(skip_all)]
     pub async fn stop(&mut self) -> Result<()> {
         if let Some(container) = &self.container {
             info!("Stopping monitoring...");
