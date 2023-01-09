@@ -1,4 +1,4 @@
-name: Install Page
+name: Publish Page
 
 on:
   push:
