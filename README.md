@@ -7,9 +7,10 @@ You must to know your channel id (`CID`) before installing the agent.
 
 Run this command
 
-`shell
-CLUSTER=devnet CID=... sh -c "$(curl -sSfL https://mfactory-lab.github.io/svt-agent/install.sh)"
-`
+```shell
+CLUSTER=devnet CID=9ZTubJxjAPfPUAoC8Y9PeHNHbn3hkcq7DkiQpZT2cucV \
+bash -c "$(curl -sSfL https://mfactory-lab.github.io/svt-agent/install.sh)"
+````
 
 # Configuration
 
