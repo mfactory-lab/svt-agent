@@ -1,14 +1,14 @@
 # SVT Agent
-SVT Agent is an application for secure communication with the server 
-through the blockchain
+SVT Agent is an app for secure communication with the server 
+through the solana blockchain.
 
 ## Getting Started
-You must know your `CHANNEL_ID` before installing the agent.
+You must to know your channel id (`CID`) before installing the agent.
 
 Run this command
 
 `shell
-CHANNEL_ID=... CLUSTER=devnet sh -c "$(curl -sSfL https://svt.one/install-agent.sh)"
+CLUSTER=devnet CID=... sh -c "$(curl -sSfL https://mfactory-lab.github.io/svt-agent/install.sh)"
 `
 
 # Configuration
