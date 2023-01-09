@@ -26,9 +26,9 @@ pub struct Agent<'a> {
     runner: Arc<RwLock<TaskRunner>>,
 }
 
-impl<'a> Agent<'_> {
+impl<'a> Agent<'a> {
     #[tracing::instrument]
-    pub fn new(args: &AgentArgs) -> Result<Self> {
+    pub fn new(args: &'a AgentArgs) -> Result<Self> {
         let keypair = read_keypair_file(&args.keypair).expect("Authority keypair file not found");
 
         let mut runner = TaskRunner::new();
@@ -288,7 +288,9 @@ impl<'a> Agent<'_> {
                                         let _ = runner.write().await.reset_state();
                                     }
                                 },
-                                _ => {}
+                                _ => {
+                                    runner.write().await.delete_task(e.message.id);
+                                }
                             }
                         }
                     }
@@ -325,29 +327,22 @@ impl<'a> Agent<'_> {
                     match listener.log_stream().await {
                         Ok((mut stream, _)) => {
                             while let Some(log) = stream.next().await {
-                                if let Err(e) = listener.on::<NewMessageEvent>(&log, &|evt| {
-                                    if let Err(e) = new_msg_sender.send(evt) {
-                                        warn!("[NewMessageEvent] Failed to send... {}", e);
-                                    }
-                                }) {
-                                    error!("[NewMessageEvent] Error: {}", e);
-                                }
-
-                                if let Err(e) = listener.on::<DeleteMessageEvent>(&log, &|evt| {
-                                    if let Err(e) = delete_msg_sender.send(evt) {
-                                        warn!("[DeleteMessageEvent] Failed to send... {}", e);
-                                    }
-                                }) {
-                                    error!("[DeleteMessageEvent] Error: {}", e);
-                                }
-
-                                if let Err(e) = listener.on::<UpdateMessageEvent>(&log, &|evt| {
-                                    if let Err(e) = update_msg_sender.send(evt) {
-                                        warn!("[UpdateMessageEvent] Failed to send... {}", e);
-                                    }
-                                }) {
-                                    error!("[UpdateMessageEvent] Error: {}", e);
-                                }
+                                listener
+                                    .on::<NewMessageEvent>(&log, &|evt| {
+                                        if let Err(e) = new_msg_sender.send(evt) {
+                                            warn!("[NewMessageEvent] Failed to send... {}", e);
+                                        }
+                                    })
+                                    .on::<DeleteMessageEvent>(&log, &|evt| {
+                                        if let Err(e) = delete_msg_sender.send(evt) {
+                                            warn!("[DeleteMessageEvent] Failed to send... {}", e);
+                                        }
+                                    })
+                                    .on::<UpdateMessageEvent>(&log, &|evt| {
+                                        if let Err(e) = update_msg_sender.send(evt) {
+                                            warn!("[UpdateMessageEvent] Failed to send... {}", e);
+                                        }
+                                    });
                             }
                         }
                         Err(e) => {

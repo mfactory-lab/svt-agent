@@ -74,7 +74,7 @@ impl<'a> Listener<'a> {
     //     Ok(())
     // }
 
-    pub fn on<T>(&self, log: &Response<RpcLogsResponse>, cb: &impl Fn(T)) -> Result<()>
+    pub fn on<T>(&self, log: &Response<RpcLogsResponse>, cb: &impl Fn(T)) -> &Self
     where
         T: Event,
     {
@@ -117,7 +117,7 @@ impl<'a> Listener<'a> {
             }
         }
 
-        Ok(())
+        self
     }
 }
 

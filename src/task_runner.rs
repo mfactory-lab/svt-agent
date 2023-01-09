@@ -63,27 +63,22 @@ pub struct TaskRunner {
     db: Option<Db>,
     /// Working directory with playbooks, config, etc
     working_dir: PathBuf,
-    monitor_port: u16,
-    monitor_start_timeout_ms: u64,
     /// The name of the container with witch the task is run
     container_name: String,
+    monitor_port: u16,
+    monitor_start_timeout_ms: u64,
 }
 
 impl TaskRunner {
     pub fn new() -> Self {
-        let monitor_port = std::env::var("AGENT_MONITOR_PORT")
-            .unwrap_or_default()
-            .parse::<u16>()
-            .unwrap_or(DEFAULT_MONITOR_PORT);
-
         Self {
             queue: VecDeque::new(),
             docker: Docker::new(),
             state: Mutex::new(RunState::default()),
             working_dir: PathBuf::from(DEFAULT_WORKING_DIR),
-            monitor_start_timeout_ms: MONITOR_START_TIMEOUT_MS,
-            monitor_port,
             container_name: format!("{}-task", CONTAINER_NAME),
+            monitor_start_timeout_ms: MONITOR_START_TIMEOUT_MS,
+            monitor_port: 8888,
             db: None,
         }
     }
@@ -316,6 +311,11 @@ impl TaskRunner {
     /// Add new [task] to the [queue]
     pub fn add_task(&mut self, task: Task) {
         self.queue.push_back(task);
+    }
+
+    /// Delete [task] from the queue
+    pub fn delete_task(&mut self, task_id: u64) {
+        self.queue.retain(|t| t.id != task_id);
     }
 
     /// Clear the [queue]
