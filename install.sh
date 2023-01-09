@@ -5,8 +5,8 @@
 # SVT Agent installation script
 #
 # Run command:
-#   CHANNEL_ID=QXK7qRCaabreGjcNHcKEadQDtTY9BJKHKfU11QAE6Xp CLUSTER=devnet \
-#   sh -c "$(curl -sSfL https://svt.one/install-agent.sh)"
+#   CLUSTER=devnet CID=QXK7qRCaabreGjcNHcKEadQDtTY9BJKHKfU11QAE6Xp \
+#   sh -c "$(curl -sSfL https://mfactory-lab.github.io/svt-agent/install.sh)"
 #
 
 AGENT_RELEASE="${AGENT_RELEASE:-latest}"
@@ -17,21 +17,21 @@ WORKING_DIR="$HOME/svt-agent"
 KEYPAIR_PATH="$WORKING_DIR/keypair.json"
 
 # ARE YOU ROOT (or sudo)?
-if [[ $EUID -ne 0 ]]; then
-	echo -e "ERROR: This script must be run as root"
-	exit 1
-fi
+#if [[ $EUID -ne 0 ]]; then
+#	echo -e "ERROR: This script must be run as root"
+#	exit 1
+#fi
 
 do_install() {
   echo "Installing SVT Agent..."
 
   ensure is_valid_cluster $CLUSTER
   # TODO: validate channel_id
-  # ensure is_valid_channel $CHANNEL_ID
+  # ensure is_valid_channel $CID
   ensure generate_sshkey "id_rsa"
 
-  if [ -z "$CHANNEL_ID" ]; then
-    err "Please provide \"CHANNEL_ID\""
+  if [ -z "$CID" ]; then
+    err "Please provide some channel id \"CID=...\""
   fi
 
   if ! check_cmd "docker"; then
@@ -79,7 +79,7 @@ do_install() {
     mfactory-lab/svt-agent:$AGENT_RELEASE \
     run \
     --cluster $CLUSTER \
-    --channel-id $CHANNEL_ID)"
+    --channel-id $CID)"
 
   say "Container ID: $CONTAINER_ID"
   say "Done"
