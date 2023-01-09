@@ -1,3 +1,5 @@
+#![allow(unused)]
+
 mod agent;
 mod constants;
 mod encryption;
