@@ -30,3 +30,4 @@ modules.xml
 # End of https://www.toptal.com/developers/gitignore/api/intellij+iml
 
 ansible/db
+keypair.json
