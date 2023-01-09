@@ -41,9 +41,8 @@ do_install() {
     echo "Done"
   fi
 
-  if [ ! -d $WORKING_DIR ]; then
-    mkdir -p $WORKING_DIR
-  fi
+  mkdir -p $WORKING_DIR
+  mkdir -p $WORKING_DIR/logs
 
   #say "Setup firewall..."
   #sudo ufw allow $EXPOSE_PORT/tcp
@@ -76,6 +75,7 @@ do_install() {
     -v svt-agent-ansible:/app/ansible \
     -v $SSHKEY_PATH:/root/.ssh \
     -v $KEYPAIR_PATH:/app/keypair.json \
+    -v $WORKING_DIR/logs:/logs \
     mfactory-lab/svt-agent:$AGENT_RELEASE \
     run \
     --cluster $CLUSTER \
