@@ -7,13 +7,13 @@ on:
       - src/install.sh
   workflow_dispatch:
 
-  jobs:
-    deploy:
+jobs:
+  deploy:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
 
-      - name: Copy
+      - name: Copy Files
         run: mkdir dist && cp install.sh ./dist
 
       - name: Deploy 🚀
