@@ -290,6 +290,7 @@ impl TaskRunner {
                 // "--connection=local",
                 // "-vvv",
             ])
+            .env(["ANSIBLE_HOST_KEY_CHECKING=False"])
             .build();
 
         info!("Creating task container... {:?}", &options);

@@ -124,7 +124,7 @@ impl<'a> Agent<'a> {
                 Err(Error::msg("Awaiting authorization..."))
             }
             Err(e) => {
-                error!("Error: {}", e);
+                warn!("{}", e);
                 self.client
                     .join_channel(&self.args.channel_id, Some(AGENT_NAME.to_string()))
                     .await?;
