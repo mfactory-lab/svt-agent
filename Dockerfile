@@ -17,7 +17,8 @@ RUN cargo build --release
 
 FROM chef AS ansible
 RUN curl -sLO https://github.com/mfactory-lab/sv-manager/archive/refs/tags/latest.tar.gz \
-  && tar -xvf latest.tar.gz --strip-components=1
+  && tar -xvf latest.tar.gz --strip-components=1 \
+  && mv inventory_example inventory
 
 #FROM gcr.io/distroless/cc
 #FROM gcr.io/distroless/cc-debian1
