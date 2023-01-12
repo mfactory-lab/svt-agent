@@ -14,7 +14,7 @@ use crate::agent::Agent;
 use crate::constants::*;
 
 use anchor_client::solana_sdk::pubkey::Pubkey;
-use anchor_client::solana_sdk::signature::Keypair;
+use anchor_client::solana_sdk::signature::{read_keypair_file, Keypair, Signer};
 use anchor_client::Cluster;
 use anyhow::Result;
 use clap::{Args, Parser, Subcommand};
@@ -38,6 +38,16 @@ struct Cli {
 #[derive(Subcommand, Debug)]
 enum Commands {
     GenerateKeypair,
+    ShowPubkey {
+        #[arg(
+            long,
+            short,
+            value_name = "KEYPAIR",
+            env = "AGENT_KEYPAIR",
+            default_value = "/app/keypair.json"
+        )]
+        keypair: PathBuf,
+    },
     CheckChannel {
         #[arg(long, value_name = "CLUSTER", default_value = "devnet")]
         cluster: Cluster,
@@ -94,6 +104,11 @@ async fn main() -> Result<()> {
             let client = MessengerClient::new(cluster.clone(), *program_id, Keypair::new());
             let channel = client.load_channel(channel_id).await;
             println!("{}", if channel.is_ok() { "OK" } else { "INVALID" })
+        }
+        Commands::ShowPubkey { keypair } => {
+            let keypair = read_keypair_file(keypair).expect("Authority keypair file not found");
+            let pubkey = keypair.pubkey().to_string();
+            println!("{pubkey}")
         }
         Commands::GenerateKeypair => {
             let kp = Keypair::generate(&mut OsRng);
