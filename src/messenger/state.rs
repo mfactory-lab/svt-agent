@@ -91,6 +91,7 @@ pub struct Message {
 #[event]
 #[derive(Debug, Clone)]
 pub struct NewMessageEvent {
+    #[index]
     pub channel: Pubkey,
     pub message: Message,
 }
@@ -98,6 +99,7 @@ pub struct NewMessageEvent {
 #[event]
 #[derive(Debug, Clone)]
 pub struct UpdateMessageEvent {
+    #[index]
     pub channel: Pubkey,
     pub message: Message,
 }
@@ -105,8 +107,10 @@ pub struct UpdateMessageEvent {
 #[event]
 #[derive(Debug, Clone)]
 pub struct DeleteMessageEvent {
+    #[index]
     pub channel: Pubkey,
-    pub message: Message,
+    pub authority: Pubkey,
+    pub id: u64,
 }
 
 #[test]

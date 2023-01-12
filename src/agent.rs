@@ -16,7 +16,7 @@ use std::time::Duration;
 use tokio::sync::{mpsc, RwLock};
 use tokio::task::JoinHandle;
 use tokio::time;
-use tracing::{error, info, warn};
+use tracing::{debug, error, info, warn};
 
 pub struct Agent<'a> {
     args: &'a AgentArgs,
@@ -289,13 +289,13 @@ impl<'a> Agent<'a> {
                             let state = runner.read().await.current_state();
                             match state {
                                 RunState::Error(task) | RunState::Processing(task) => {
-                                    if task.id == e.message.id {
+                                    if task.id == e.id {
                                         info!("Task #{} was deleted...", task.id);
                                         let _ = runner.write().await.reset_state();
                                     }
                                 },
                                 _ => {
-                                    runner.write().await.delete_task(e.message.id);
+                                    runner.write().await.delete_task(e.id);
                                 }
                             }
                         }
@@ -333,6 +333,7 @@ impl<'a> Agent<'a> {
                                     while let Some(log) = stream.next().await {
                                         listener
                                             .on::<NewMessageEvent>(&log, &|evt| {
+                                                debug!("{:?}", evt);
                                                 if let Err(e) = new_msg_sender.send(evt) {
                                                     warn!(
                                                         "[NewMessageEvent] Failed to send... {}",
@@ -341,6 +342,7 @@ impl<'a> Agent<'a> {
                                                 }
                                             })
                                             .on::<DeleteMessageEvent>(&log, &|evt| {
+                                                debug!("{:?}", evt);
                                                 if let Err(e) = delete_msg_sender.send(evt) {
                                                     warn!(
                                                         "[DeleteMessageEvent] Failed to send... {}",
@@ -349,6 +351,7 @@ impl<'a> Agent<'a> {
                                                 }
                                             })
                                             .on::<UpdateMessageEvent>(&log, &|evt| {
+                                                debug!("{:?}", evt);
                                                 if let Err(e) = update_msg_sender.send(evt) {
                                                     warn!(
                                                         "[UpdateMessageEvent] Failed to send... {}",
