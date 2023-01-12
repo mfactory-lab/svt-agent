@@ -146,12 +146,16 @@ impl<'a> Agent<'a> {
         let mut need_reset = true;
 
         let curr_task_id = match self.runner.read().await.current_state() {
-            RunState::Processing(t) | RunState::Complete(t) | RunState::Error(t) => t.id,
+            RunState::Processing(t) | RunState::Complete(t) | RunState::Error(t) => {
+                info!("Current task id: {}", t.id);
+                t.id
+            }
             _ => 0,
         };
 
         for message in channel.messages {
-            if message.id > id_from {
+            let msg_id = message.id;
+            if msg_id > id_from {
                 if let Ok(task) = convert_message_to_task(message, cek) {
                     // check that the current task is valid
                     if task.id == curr_task_id {
@@ -160,6 +164,8 @@ impl<'a> Agent<'a> {
                     if !task.is_skipped() {
                         tasks.push(task);
                     }
+                } else {
+                    warn!("Failed to convert message to task... Message#{}", msg_id);
                 }
             }
         }
