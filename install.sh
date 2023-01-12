@@ -52,9 +52,10 @@ do_install() {
   say "Downloading agent image (release: $AGENT_RELEASE)..."
   ensure docker pull $IMAGE_NAME:$AGENT_RELEASE
 
-  say "Cleanup..."
+  say "Cleaning up..."
   docker stop $CONTAINER_NAME 2>/dev/null 1>/dev/null
   docker container rm $CONTAINER_NAME 2>/dev/null 1>/dev/null
+  docker volume rm "$CONTAINER_NAME-ansible" 2>/dev/null 1>/dev/null
 
   say "Try to generate agent keypair..."
   if [[ -f $KEYPAIR_PATH ]]; then
