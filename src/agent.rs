@@ -5,7 +5,7 @@ use crate::task_runner::{RunState, Task, TaskRunner};
 use crate::utils::convert_message_to_task;
 use crate::AgentArgs;
 
-use anchor_client::solana_client::nonblocking::pubsub_client::PubsubClient;
+use anchor_client::solana_client::nonblocking::pubsub_client::{PubsubClient, PubsubClientResult};
 use anchor_client::solana_client::rpc_config::RpcTransactionLogsFilter;
 use anchor_client::solana_sdk::signature::read_keypair_file;
 
@@ -316,48 +316,61 @@ impl<'a> Agent<'a> {
                 loop {
                     info!("Connecting to `{}`...", url);
 
-                    let client = PubsubClient::new(url.as_str())
-                        .await
-                        .expect("Failed to init `PubsubClient`");
+                    match PubsubClient::new(url.as_str()).await {
+                        Ok(client) => {
+                            info!("Waiting a command...");
 
-                    info!("Waiting a command...");
+                            let listener = Listener::new(&program_id, &client, &filter);
 
-                    let listener = Listener::new(&program_id, &client, &filter);
-
-                    match listener.log_stream().await {
-                        Ok((mut stream, _)) => {
-                            while let Some(log) = stream.next().await {
-                                listener
-                                    .on::<NewMessageEvent>(&log, &|evt| {
-                                        if let Err(e) = new_msg_sender.send(evt) {
-                                            warn!("[NewMessageEvent] Failed to send... {}", e);
-                                        }
-                                    })
-                                    .on::<DeleteMessageEvent>(&log, &|evt| {
-                                        if let Err(e) = delete_msg_sender.send(evt) {
-                                            warn!("[DeleteMessageEvent] Failed to send... {}", e);
-                                        }
-                                    })
-                                    .on::<UpdateMessageEvent>(&log, &|evt| {
-                                        if let Err(e) = update_msg_sender.send(evt) {
-                                            warn!("[UpdateMessageEvent] Failed to send... {}", e);
-                                        }
-                                    });
+                            match listener.log_stream().await {
+                                Ok((mut stream, _)) => {
+                                    while let Some(log) = stream.next().await {
+                                        listener
+                                            .on::<NewMessageEvent>(&log, &|evt| {
+                                                if let Err(e) = new_msg_sender.send(evt) {
+                                                    warn!(
+                                                        "[NewMessageEvent] Failed to send... {}",
+                                                        e
+                                                    );
+                                                }
+                                            })
+                                            .on::<DeleteMessageEvent>(&log, &|evt| {
+                                                if let Err(e) = delete_msg_sender.send(evt) {
+                                                    warn!(
+                                                        "[DeleteMessageEvent] Failed to send... {}",
+                                                        e
+                                                    );
+                                                }
+                                            })
+                                            .on::<UpdateMessageEvent>(&log, &|evt| {
+                                                if let Err(e) = update_msg_sender.send(evt) {
+                                                    warn!(
+                                                        "[UpdateMessageEvent] Failed to send... {}",
+                                                        e
+                                                    );
+                                                }
+                                            });
+                                    }
+                                }
+                                Err(e) => {
+                                    error!("Error: {:?}", e);
+                                }
                             }
-                        }
-                        Err(e) => {
-                            error!("Error: {:?}", e);
-                        }
-                    }
 
-                    match &client.shutdown().await {
-                        Ok(_) => {}
+                            match &client.shutdown().await {
+                                Ok(_) => {}
+                                Err(e) => {
+                                    info!("Failed to shutdown client ({})", e);
+                                }
+                            }
+                            info!("Reconnecting...");
+                            time::sleep(Duration::from_millis(3000)).await;
+                        }
                         Err(e) => {
-                            info!("Failed to shutdown client ({})", e);
+                            warn!("{}", e);
+                            time::sleep(Duration::from_millis(3000)).await;
                         }
                     }
-                    info!("Reconnecting...");
-                    time::sleep(Duration::from_millis(3000)).await;
                 }
             }
         })

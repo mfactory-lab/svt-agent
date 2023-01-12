@@ -1,9 +1,11 @@
 use crate::messenger::CEKData;
 use anchor_lang::__private::base64;
+use anyhow::Error;
 use anyhow::Result;
 use chacha20poly1305::aead::{Aead, NewAead, Payload};
 use chacha20poly1305::{Key, XChaCha20Poly1305, XNonce};
 use sha2::{Digest, Sha256, Sha512};
+
 use x25519_dalek::{PublicKey, StaticSecret};
 use zeroize::Zeroize;
 
@@ -56,7 +58,7 @@ pub fn decrypt_cek(cek: CEKData, private_key: &[u8]) -> Result<Vec<u8>> {
 
     let res = cipher
         .decrypt(nonce, payload)
-        .expect("CEK decryption failure");
+        .map_err(|e| Error::msg("Message encryption failure"))?;
 
     Ok(res)
 }
@@ -78,7 +80,7 @@ pub fn decrypt_message<T: AsRef<[u8]>>(message: T, cek: &[u8]) -> Result<Vec<u8>
                 aad: &[],
             },
         )
-        .expect("Message decryption failure");
+        .map_err(|e| Error::msg("Message decryption failure"))?;
 
     Ok(res)
 }
