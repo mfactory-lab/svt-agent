@@ -290,7 +290,7 @@ impl TaskRunner {
                 &format!("./playbooks/{}.yaml", task.name),
                 &format!("-e {}", task.args),
                 // "-i 127.0.0.1,",
-                // "--connection=local",
+                "--connection=local",
                 // "-vvv",
             ])
             .env(["ANSIBLE_HOST_KEY_CHECKING=False"])
