@@ -1,0 +1,47 @@
+{
+  "commands": [
+    {
+      "name": "test",
+      "desc": "",
+      "args": [
+        "sleep"
+      ]
+    },
+    {
+      "name": "restart_cluster",
+      "desc": "restart cluster",
+      "args": [
+        "host_hosts"
+      ]
+    },
+    {
+      "name": "config",
+      "desc": "install or update config file",
+      "args": []
+    },
+    {
+      "name": "install_monitoring",
+      "desc": "install monitoring",
+      "args": []
+    },
+    {
+      "name": "install_validator",
+      "desc": "install solana validator",
+      "args": [
+        "validator_name",
+        "solana_user",
+        "secrets_path"
+      ]
+    },
+    {
+      "name": "stop_validator",
+      "desc": "stop solana validator",
+      "args": []
+    },
+    {
+      "name": "update_validator",
+      "desc": "update solana validator",
+      "args": []
+    }
+  ]
+}
