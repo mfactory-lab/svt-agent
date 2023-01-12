@@ -9,13 +9,13 @@
 #   bash -c "$(curl -sSfL https://mfactory-lab.github.io/svt-agent/install.sh)"
 #
 
+IMAGE_NAME=ghcr.io/mfactory-lab/svt-agent
 AGENT_RELEASE="${AGENT_RELEASE:-latest}"
 CLUSTER="${CLUSTER:-devnet}"
 CONTAINER_NAME="${CONTAINER_NAME:-svt-agent}"
 SSHKEY_PATH="$HOME/.ssh/svt-agent"
 WORKING_DIR="$HOME/svt-agent"
 KEYPAIR_PATH="$WORKING_DIR/keypair.json"
-IMAGE_NAME=ghcr.io/mfactory-lab/svt-agent
 
 # ARE YOU ROOT (or sudo)?
 #if [[ $EUID -ne 0 ]]; then
@@ -50,25 +50,25 @@ do_install() {
   #say "Done"
 
   say "Downloading agent image (release: $AGENT_RELEASE)..."
-
   ensure docker pull $IMAGE_NAME:$AGENT_RELEASE
+
+  say "Cleanup..."
   docker stop $CONTAINER_NAME 2>/dev/null 1>/dev/null
   docker container rm $CONTAINER_NAME 2>/dev/null 1>/dev/null
 
-  # Generate agent keypair
+  say "Try to generate agent keypair..."
   if [[ -f $KEYPAIR_PATH ]]; then
     say "Agent keypair already exits ($KEYPAIR_PATH)"
   else
     KEYPAIR="$(docker run --rm -it $IMAGE_NAME:$AGENT_RELEASE generate-keypair)"
     echo $KEYPAIR > $KEYPAIR_PATH
-    say "Added new agent keypair... ($KEYPAIR_PATH)"
+    say "Added new agent keypair ($KEYPAIR_PATH)"
   fi
 
   if [[ ! -f $KEYPAIR_PATH ]]; then
     err "Something went wrong. Agent keypair file is not exists."
   fi
 
-  # Run agent
   say "Starting docker container..."
   CONTAINER_ID="$(docker run -d -it --restart=always --name $CONTAINER_NAME \
     --hostname $CONTAINER_NAME \
@@ -81,8 +81,13 @@ do_install() {
     run \
     --cluster $CLUSTER \
     --channel-id $CID)"
-
   say "Container ID: $CONTAINER_ID"
+
+  say "SVT-Agent successfully installed!"
+  say "Please add some balance to the agent address."
+  say ""
+  say "Address(Pubkey): ..."
+  say ""
   say "Done"
 }
 

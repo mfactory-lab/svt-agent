@@ -287,7 +287,7 @@ impl TaskRunner {
             .working_dir("/app/ansible")
             .cmd(vec![
                 "ansible-playbook",
-                &format!("./playbooks/{}.yml", task.name),
+                &format!("./playbooks/{}.yaml", task.name),
                 &format!("-e {}", task.args),
                 // "-i 127.0.0.1,",
                 // "--connection=local",

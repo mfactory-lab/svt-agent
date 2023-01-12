@@ -15,9 +15,9 @@ COPY --from=cacher /app/target target
 COPY --from=cacher /usr/local/cargo /usr/local/cargo
 RUN cargo build --release
 
-#FROM chef AS ansible
-#RUN curl -sLO https://github.com/mfactory-lab/sv-manager/archive/refs/tags/latest.tar.gz \
-#  && tar -xvf latest.tar.gz -C /ansible
+FROM chef AS ansible
+RUN curl -sLO https://github.com/mfactory-lab/sv-manager/archive/refs/tags/latest.tar.gz \
+  && tar -xvf latest.tar.gz -C /ansible
 
 #FROM gcr.io/distroless/cc
 #FROM gcr.io/distroless/cc-debian1
@@ -26,7 +26,7 @@ FROM debian:bullseye-slim AS runtime
 WORKDIR app
 
 COPY --from=builder /app/target/release/svt-agent /usr/local/bin/svt-agent
-#COPY --from=ansible /ansible/ ./ansible
+COPY --from=ansible /ansible/ ./ansible
 COPY ./ansible/ ./ansible
 
 RUN mkdir -p logs
