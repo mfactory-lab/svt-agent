@@ -2,7 +2,6 @@
 
 mod agent;
 mod constants;
-mod encryption;
 mod listener;
 mod messenger;
 mod monitor;

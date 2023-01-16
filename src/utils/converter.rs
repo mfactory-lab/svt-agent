@@ -1,4 +1,4 @@
-use crate::encryption::decrypt_message;
+use crate::messenger::decrypt_message;
 use crate::messenger::Message;
 use crate::task_runner::Task;
 use anyhow::Error;

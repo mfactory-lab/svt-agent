@@ -1,6 +1,8 @@
 use crate::constants::{ANSIBLE_IMAGE, CONTAINER_NAME};
 use crate::monitor::{TaskMonitor, TaskMonitorOptions};
-use crate::notifier::Notifier;
+use crate::notifier::{Notifier, NotifierOpts};
+use crate::AgentArgs;
+use anchor_client::Cluster;
 use anchor_lang::prelude::*;
 use anyhow::{Error, Result};
 use futures::StreamExt;
@@ -59,28 +61,35 @@ pub struct TaskRunner {
     state: Mutex<RunState>,
     /// [Docker] instance (task running)
     docker: Docker,
-    /// [Db] instance (state persistence)
+    /// Sled [Db] instance for state persistence
     db: Option<Db>,
     /// Working directory with playbooks, config, etc
     working_dir: PathBuf,
-    /// The name of the container with witch the task is run
+    /// The name of the task container
     container_name: String,
     monitor_port: u16,
     monitor_start_timeout_ms: u64,
+    notifier_opts: NotifierOpts,
 }
 
 impl TaskRunner {
     pub fn new() -> Self {
         Self {
+            db: None,
             queue: VecDeque::new(),
             docker: Docker::new(),
-            state: Mutex::new(RunState::default()),
+            state: Default::default(),
             working_dir: PathBuf::from(DEFAULT_WORKING_DIR),
             container_name: format!("{}-task", CONTAINER_NAME),
             monitor_start_timeout_ms: MONITOR_START_TIMEOUT_MS,
             monitor_port: 8888,
-            db: None,
+            notifier_opts: Default::default(),
         }
+    }
+
+    pub fn with_notifier_opts(&mut self, opts: NotifierOpts) -> &mut Self {
+        self.notifier_opts = opts;
+        self
     }
 
     pub fn with_working_dir(&mut self, path: PathBuf) -> &mut Self {
@@ -153,7 +162,8 @@ impl TaskRunner {
         self.ping().await?;
 
         if let Some(task) = self.queue.pop_front() {
-            let mut notifier = Notifier::new(&task).with_logs_path(self.working_dir.join("logs"));
+            let notifier_opts = self.notifier_opts.clone();
+            let mut notifier = Notifier::new(&self.notifier_opts, &task);
             // probably docker error
             let mut internal_error: Option<Error> = None;
             let mut status_code: Option<u64> = None;
@@ -289,8 +299,8 @@ impl TaskRunner {
                 "ansible-playbook",
                 &format!("./playbooks/{}.yaml", task.name),
                 &format!("-e {}", task.args),
-                // "-i 127.0.0.1,",
                 "--connection=local",
+                // "-i 127.0.0.1,",
                 // "-vvv",
             ])
             .env(["ANSIBLE_HOST_KEY_CHECKING=False"])
