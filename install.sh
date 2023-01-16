@@ -78,10 +78,11 @@ do_install() {
     -v $SSHKEY_PATH:/root/.ssh \
     -v $KEYPAIR_PATH:/app/keypair.json \
     -v $WORKING_DIR/logs:/app/logs \
+    -e AGENT_CLUSTER=$CLUSTER \
+    -e AGENT_CHANNEL_ID=$CID \
     $IMAGE_NAME:$AGENT_RELEASE \
-    run \
-    --cluster $CLUSTER \
-    --channel-id $CID)"
+    run)"
+
   say "Container ID: $CONTAINER_ID"
 
   PUBKEY="$(docker run --rm -it -v $KEYPAIR_PATH:/app/keypair.json $IMAGE_NAME:$AGENT_RELEASE show-pubkey)"
