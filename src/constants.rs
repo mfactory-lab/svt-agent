@@ -20,3 +20,10 @@ pub const CONTAINER_NAME: &str = "svt-agent";
 pub const AGENT_NAME: &str = "agent";
 
 pub const DEFAULT_MONITOR_PORT: &str = "8888";
+
+// Notifier settings
+
+pub const NOTIFY_INFLUX_URL: &str = "http://influx.thevalidators.io:8086";
+pub const NOTIFY_INFLUX_DB: &str = "svt_agent";
+pub const NOTIFY_INFLUX_USER: &str = "v_user";
+pub const NOTIFY_INFLUX_PASS: &str = "thepassword";

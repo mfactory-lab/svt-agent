@@ -9,6 +9,7 @@ use anchor_client::solana_client::nonblocking::pubsub_client::{PubsubClient, Pub
 use anchor_client::solana_client::rpc_config::RpcTransactionLogsFilter;
 use anchor_client::solana_sdk::signature::read_keypair_file;
 
+use crate::notifier::NotifierOpts;
 use anyhow::{Error, Result};
 use futures::StreamExt;
 use std::sync::Arc;
@@ -33,6 +34,11 @@ impl<'a> Agent<'a> {
 
         let mut runner = TaskRunner::new();
         runner.with_monitor_port(args.monitor_port);
+        runner.with_notifier_opts(
+            NotifierOpts::new()
+                .with_channel_id(args.channel_id)
+                .with_cluster(args.cluster.clone()),
+        );
 
         if let Some(working_dir) = &args.working_dir {
             runner.with_working_dir(working_dir.into());
