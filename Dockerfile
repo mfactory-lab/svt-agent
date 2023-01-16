@@ -15,8 +15,11 @@ COPY --from=cacher /app/target target
 COPY --from=cacher /usr/local/cargo /usr/local/cargo
 RUN cargo build --release
 
-FROM chef AS ansible
-RUN curl -sLO https://github.com/mfactory-lab/sv-manager/archive/refs/tags/latest.tar.gz \
+FROM chef AS sv_manager
+
+ARG SV_MANAGER_VERSION=latest
+
+RUN curl -sLO https://github.com/mfactory-lab/sv-manager/archive/refs/tags/${SV_MANAGER_VERSION}.tar.gz \
   && tar -xvf latest.tar.gz --strip-components=1 \
   && mv inventory_example inventory
 
@@ -27,7 +30,7 @@ FROM debian:bullseye-slim AS runtime
 WORKDIR app
 
 COPY --from=builder /app/target/release/svt-agent /usr/local/bin/svt-agent
-COPY --from=ansible /app ./ansible
+COPY --from=sv_manager /app ./ansible
 COPY ./ansible/ ./ansible
 
 RUN mkdir -p logs
