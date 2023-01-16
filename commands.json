@@ -8,40 +8,51 @@
       ]
     },
     {
-      "name": "restart_cluster",
-      "desc": "restart cluster",
+      "name": "pb_config",
+      "desc": "install or update config file",
       "args": [
-        "host_hosts"
+        "validator_name",
+        "local_secrets_path",
+        "swap_file_size_gb",
+        "ramdisk_size_gb"
       ]
     },
     {
-      "name": "config",
-      "desc": "install or update config file",
-      "args": []
+      "name": "pb_cluster_restart",
+      "desc": "restart cluster",
+      "args": [
+        "@/etc/sv_manager/sv_manager.conf"
+      ]
     },
     {
-      "name": "install_monitoring",
+      "name": "pb_install_monitoring",
       "desc": "install monitoring",
-      "args": []
+      "args": [
+        "@/etc/sv_manager/sv_manager.conf"
+      ]
     },
     {
-      "name": "install_validator",
+      "name": "pb_install_validator",
       "desc": "install solana validator",
       "args": [
         "validator_name",
         "solana_user",
-        "secrets_path"
+        "solana_version",
+        "secrets_path",
+        "@/etc/sv_manager/sv_manager.conf"
       ]
     },
     {
-      "name": "stop_validator",
+      "name": "pb_stop_validator",
       "desc": "stop solana validator",
       "args": []
     },
     {
-      "name": "update_validator",
+      "name": "pb_update_validator",
       "desc": "update solana validator",
-      "args": []
+      "args": [
+        "@/etc/sv_manager/sv_manager.conf"
+      ]
     }
   ]
 }
