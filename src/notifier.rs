@@ -16,14 +16,14 @@ use tracing_subscriber::filter::combinator::Not;
 
 #[derive(Default, Clone)]
 pub struct NotifierOpts {
-    channel_id: Pubkey,
-    cluster: Cluster,
-    logs_path: Option<PathBuf>,
-    webhook_url: String,
-    influx_url: String,
-    influx_db: String,
-    influx_user: String,
-    influx_pass: String,
+    pub channel_id: Pubkey,
+    pub cluster: Cluster,
+    pub logs_path: Option<PathBuf>,
+    pub webhook_url: String,
+    pub influx_url: String,
+    pub influx_db: String,
+    pub influx_user: String,
+    pub influx_pass: String,
 }
 
 impl NotifierOpts {

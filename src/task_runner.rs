@@ -297,10 +297,14 @@ impl TaskRunner {
             .working_dir("/app/ansible")
             .cmd(vec![
                 "ansible-playbook",
-                &format!("./playbooks/{}.yaml", task.name),
-                &format!("-e {}", task.args),
                 "--connection=local",
-                // "-i 127.0.0.1,",
+                &format!(
+                    "--inventory ./inventory/{}.yaml",
+                    self.notifier_opts.cluster
+                ),
+                "--limit localhost",
+                &format!("./playbooks/{}.yaml", task.name),
+                &format!("--extra-vars \"{}\"", task.args),
                 // "-vvv",
             ])
             .env(["ANSIBLE_HOST_KEY_CHECKING=False"])
