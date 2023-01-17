@@ -6,10 +6,11 @@ use anchor_client::Cluster;
 use anchor_lang::prelude::*;
 use anyhow::{Error, Result};
 use futures::StreamExt;
+use serde_json::json;
 use shiplift::tty::TtyChunk;
 use shiplift::{Container, ContainerOptions, Docker, LogsOptions, PullOptions};
 use sled::Db;
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 use std::path::PathBuf;
 use std::sync::Mutex;
 use std::time::Duration;
@@ -28,7 +29,7 @@ pub struct Task {
     /// Task name (ansible playbook)
     pub name: String,
     /// Arguments of the task (ansible `--extra-vars`)
-    pub args: String,
+    pub args: HashMap<String, String>,
     /// Secret key, used as password for monitoring
     pub secret: String,
     /// Manual task action
@@ -297,8 +298,11 @@ impl TaskRunner {
             // .privileged(true)
             // for local tests...
             // .volumes(vec![
-            //     &format!("{}:/ansible:ro", self.working_dir.to_str().unwrap()),
-            //     "/root/.ssh/id_rsa:/root/.ssh/id_rsa:ro",
+            //     &format!(
+            //         "{}:/app/ansible:ro",
+            //         self.opts.working_dir.to_str().unwrap()
+            //     ),
+            //     "/Users/tiamo/.ssh/id_rsa:/root/.ssh/id_rsa:ro",
             //     // "~/.ansible/roles:/root/.ansible/roles",
             // ])
             .volumes_from(vec![CONTAINER_NAME])
@@ -306,10 +310,10 @@ impl TaskRunner {
             .cmd(vec![
                 "ansible-playbook",
                 "--connection=local",
+                "--limit=localhost",
+                &format!("--inventory=./inventory/{}.yaml", self.opts.cluster),
+                &format!("--extra-vars={}", json!(task.args)),
                 &format!("./playbooks/{}.yaml", task.name),
-                &format!("--inventory ./inventory/{}.yaml", self.opts.cluster),
-                "--limit localhost",
-                &format!("--extra-vars \"{}\"", task.args),
                 // "-vvv",
             ])
             .env(["ANSIBLE_HOST_KEY_CHECKING=False"])
@@ -446,7 +450,7 @@ mod tests {
             id: 0,
             secret: "".to_string(),
             name: "test".to_string(),
-            args: "sleep=10".to_string(),
+            args: HashMap::from([("sleep".to_string(), "10".to_string())]),
             action: "".to_string(),
         };
 
