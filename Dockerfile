@@ -35,7 +35,7 @@ COPY ./ansible/ ./ansible
 
 RUN mkdir -p logs
 
-ENV RUST_LOG=debug
+ENV RUST_LOG=info
 ENV RUST_BACKTRACE=1
 
 ENTRYPOINT ["/usr/local/bin/svt-agent"]
