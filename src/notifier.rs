@@ -223,7 +223,7 @@ impl<'a> Notifier<'a> {
     fn get_influx_client(&self) -> Result<influxdb::Client> {
         let is_active = std::env::var("AGENT_NOTIFY_INFLUX")
             .map(|v| v != "false")
-            .unwrap_or(false);
+            .unwrap_or(true);
 
         if !is_active {
             return Err(Error::msg("Influx is inactive"));
