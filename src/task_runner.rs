@@ -55,51 +55,57 @@ impl Default for RunState {
     }
 }
 
+pub struct TaskRunnerOpts {
+    /// Working directory with playbooks, config, etc
+    pub working_dir: PathBuf,
+    /// The name of the task container
+    pub container_name: String,
+    pub monitor_port: u16,
+    pub monitor_start_timeout_ms: u64,
+    pub channel_id: Pubkey,
+    pub cluster: Cluster,
+}
+
+impl TaskRunnerOpts {
+    pub fn new(args: &AgentArgs) -> Self {
+        let working_dir = if let Some(working_dir) = &args.working_dir {
+            working_dir.into()
+        } else {
+            PathBuf::from(DEFAULT_WORKING_DIR)
+        };
+
+        Self {
+            working_dir,
+            container_name: format!("{}-task", CONTAINER_NAME),
+            monitor_start_timeout_ms: MONITOR_START_TIMEOUT_MS,
+            monitor_port: args.monitor_port,
+            channel_id: args.channel_id,
+            cluster: args.cluster.clone(),
+        }
+    }
+}
+
 pub struct TaskRunner {
     /// The [Task] queue
     queue: VecDeque<Task>,
+    /// Current run state
     state: Mutex<RunState>,
     /// [Docker] instance (task running)
     docker: Docker,
     /// Sled [Db] instance for state persistence
     db: Option<Db>,
-    /// Working directory with playbooks, config, etc
-    working_dir: PathBuf,
-    /// The name of the task container
-    container_name: String,
-    monitor_port: u16,
-    monitor_start_timeout_ms: u64,
-    notifier_opts: NotifierOpts,
+    opts: TaskRunnerOpts,
 }
 
 impl TaskRunner {
-    pub fn new() -> Self {
+    pub fn new(opts: TaskRunnerOpts) -> Self {
         Self {
-            db: None,
             queue: VecDeque::new(),
-            docker: Docker::new(),
             state: Default::default(),
-            working_dir: PathBuf::from(DEFAULT_WORKING_DIR),
-            container_name: format!("{}-task", CONTAINER_NAME),
-            monitor_start_timeout_ms: MONITOR_START_TIMEOUT_MS,
-            monitor_port: 8888,
-            notifier_opts: Default::default(),
+            docker: Docker::new(),
+            db: None,
+            opts,
         }
-    }
-
-    pub fn with_notifier_opts(&mut self, opts: NotifierOpts) -> &mut Self {
-        self.notifier_opts = opts;
-        self
-    }
-
-    pub fn with_working_dir(&mut self, path: PathBuf) -> &mut Self {
-        self.working_dir = path;
-        self
-    }
-
-    pub fn with_monitor_port(&mut self, port: u16) -> &mut Self {
-        self.monitor_port = port;
-        self
     }
 
     /// Ping the docker healthy
@@ -114,15 +120,15 @@ impl TaskRunner {
     /// Pull [ANSIBLE_IMAGE] if not exists
     #[tracing::instrument(skip_all)]
     pub async fn init(&mut self) -> Result<()> {
-        if !self.working_dir.is_dir() {
+        if !self.opts.working_dir.is_dir() {
             return Err(Error::msg(format!(
                 "Working dir `{}` is not exists...",
-                self.working_dir.to_str().unwrap()
+                self.opts.working_dir.to_str().unwrap()
             )));
         }
 
         // initialize db
-        let home = self.working_dir.to_str().unwrap();
+        let home = self.opts.working_dir.to_str().unwrap();
         self.db = Some(sled::open(format!("{}/db", home))?);
 
         if let Err(e) = self.load_state() {
@@ -162,8 +168,10 @@ impl TaskRunner {
         self.ping().await?;
 
         if let Some(task) = self.queue.pop_front() {
-            let notifier_opts = self.notifier_opts.clone();
-            let mut notifier = Notifier::new(&self.notifier_opts, &task);
+            let notifier_opts = NotifierOpts::new()
+                .with_cluster(self.opts.cluster.clone())
+                .with_channel_id(self.opts.channel_id);
+            let mut notifier = Notifier::new(&notifier_opts, &task);
             // probably docker error
             let mut internal_error: Option<Error> = None;
             let mut status_code: Option<u64> = None;
@@ -175,14 +183,14 @@ impl TaskRunner {
                     let _ = self.set_state(RunState::Processing(task.clone()));
 
                     let opts = TaskMonitorOptions::new()
-                        .filter(self.container_name.as_ref())
-                        .port(self.monitor_port)
+                        .filter(self.opts.container_name.as_ref())
+                        .port(self.opts.monitor_port)
                         .password(&task.secret);
 
                     let mut monitor = TaskMonitor::new(&opts, &self.docker);
 
                     let monitor_start_timeout =
-                        time::sleep(Duration::from_millis(self.monitor_start_timeout_ms));
+                        time::sleep(Duration::from_millis(self.opts.monitor_start_timeout_ms));
                     tokio::pin!(monitor_start_timeout);
 
                     loop {
@@ -266,7 +274,7 @@ impl TaskRunner {
         if let Err(_e) = self
             .docker
             .containers()
-            .get(&self.container_name)
+            .get(&self.opts.container_name)
             .delete()
             .await
         {
@@ -281,7 +289,7 @@ impl TaskRunner {
         //     .expect("Failed to inspect container");
 
         let options = ContainerOptions::builder(ANSIBLE_IMAGE)
-            .name(&self.container_name)
+            .name(&self.opts.container_name)
             .network_mode("host")
             // can't get container logs with auto_remove = true
             // .auto_remove(true)
@@ -299,10 +307,7 @@ impl TaskRunner {
                 "ansible-playbook",
                 "--connection=local",
                 &format!("./playbooks/{}.yaml", task.name),
-                &format!(
-                    "--inventory ./inventory/{}.yaml",
-                    self.notifier_opts.cluster
-                ),
+                &format!("--inventory ./inventory/{}.yaml", self.opts.cluster),
                 "--limit localhost",
                 &format!("--extra-vars \"{}\"", task.args),
                 // "-vvv",
@@ -428,8 +433,14 @@ mod tests {
         let mut playbooks = env::current_dir().unwrap();
         playbooks.push("ansible");
 
-        let mut runner = TaskRunner::new();
-        runner.with_working_dir(playbooks);
+        let mut runner = TaskRunner::new(TaskRunnerOpts::new(&AgentArgs {
+            keypair: Default::default(),
+            cluster: Default::default(),
+            channel_id: Default::default(),
+            program_id: Default::default(),
+            working_dir: None,
+            monitor_port: 0,
+        }));
 
         let task = Task {
             id: 0,

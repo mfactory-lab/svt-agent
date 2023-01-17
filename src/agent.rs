@@ -1,7 +1,7 @@
 use crate::constants::*;
 use crate::listener::Listener;
 use crate::messenger::*;
-use crate::task_runner::{RunState, Task, TaskRunner};
+use crate::task_runner::{RunState, Task, TaskRunner, TaskRunnerOpts};
 use crate::utils::convert_message_to_task;
 use crate::AgentArgs;
 
@@ -31,19 +31,7 @@ impl<'a> Agent<'a> {
     #[tracing::instrument]
     pub fn new(args: &'a AgentArgs) -> Result<Self> {
         let keypair = read_keypair_file(&args.keypair).expect("Authority keypair file not found");
-
-        let mut runner = TaskRunner::new();
-        runner.with_monitor_port(args.monitor_port);
-        runner.with_notifier_opts(
-            NotifierOpts::new()
-                .with_channel_id(args.channel_id)
-                .with_cluster(args.cluster.clone()),
-        );
-
-        if let Some(working_dir) = &args.working_dir {
-            runner.with_working_dir(working_dir.into());
-        }
-
+        let runner = TaskRunner::new(TaskRunnerOpts::new(args));
         let client = Arc::new(MessengerClient::new(
             args.cluster.clone(),
             args.program_id,
@@ -59,10 +47,11 @@ impl<'a> Agent<'a> {
 
     #[tracing::instrument(skip_all)]
     pub async fn run(&self) -> Result<()> {
-        info!("Cluster: {:?}", self.client.cluster);
+        info!("Agent Version: {}", env!("CARGO_PKG_VERSION"));
         info!("Agent ID: {:?}", self.client.authority_pubkey().to_string());
         info!("Program ID: {:?}", self.args.program_id);
         info!("Channel ID: {:?}", self.args.channel_id);
+        info!("Cluster: {}", self.client.cluster);
 
         self.init().await?;
 
