@@ -243,7 +243,7 @@ async fn test_notify() {
     let task = Task {
         id: 0,
         name: "restart".to_string(),
-        args: "sleep=10".to_string(),
+        args: Default::default(),
         secret: "".to_string(),
         action: "".to_string(),
     };

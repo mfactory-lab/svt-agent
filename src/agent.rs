@@ -272,9 +272,11 @@ impl<'a> Agent<'a> {
                             let state = runner.read().await.current_state();
                             match state {
                                 RunState::Error(task) | RunState::Processing(task) => {
-                                    if task.id == e.message.id && task.is_skipped() {
+                                    if task.is_skipped() {
                                         info!("Task #{} was skipped...", task.id);
-                                        let _ = runner.write().await.reset_state();
+                                        if task.id == e.message.id {
+                                            let _ = runner.write().await.reset_state();
+                                        }
                                     }
                                 },
                                 _ => {}
@@ -284,15 +286,14 @@ impl<'a> Agent<'a> {
                             let state = runner.read().await.current_state();
                             match state {
                                 RunState::Error(task) | RunState::Processing(task) => {
+                                    info!("Task #{} was deleted...", task.id);
                                     if task.id == e.id {
-                                        info!("Task #{} was deleted...", task.id);
                                         let _ = runner.write().await.reset_state();
                                     }
                                 },
-                                _ => {
-                                    runner.write().await.delete_task(e.id);
-                                }
+                                _ => {}
                             }
+                            runner.write().await.delete_task(e.id);
                         }
                     }
                 }
