@@ -298,12 +298,12 @@ impl TaskRunner {
             .cmd(vec![
                 "ansible-playbook",
                 "--connection=local",
+                &format!("./playbooks/{}.yaml", task.name),
                 &format!(
                     "--inventory ./inventory/{}.yaml",
                     self.notifier_opts.cluster
                 ),
                 "--limit localhost",
-                &format!("./playbooks/{}.yaml", task.name),
                 &format!("--extra-vars \"{}\"", task.args),
                 // "-vvv",
             ])
