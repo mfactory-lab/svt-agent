@@ -48,7 +48,7 @@ enum Commands {
         keypair: PathBuf,
     },
     CheckChannel {
-        #[arg(long, value_name = "CLUSTER", default_value = "devnet")]
+        #[arg(long, value_name = "CLUSTER", default_value = DEFAULT_CLUSTER)]
         cluster: Cluster,
         #[arg(short, long, value_name = "CHANNEL")]
         channel_id: Pubkey,
@@ -72,7 +72,7 @@ pub struct AgentArgs {
         long,
         value_name = "CLUSTER",
         env = "AGENT_CLUSTER",
-        default_value = "devnet"
+        default_value = DEFAULT_CLUSTER
     )]
     pub cluster: Cluster,
     #[arg(short, long, value_name = "CHANNEL", env = "AGENT_CHANNEL_ID", default_value = DEFAULT_CHANNEL_ID)]
