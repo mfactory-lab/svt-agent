@@ -87,11 +87,15 @@ do_install() {
 
   PUBKEY="$(docker run --rm -it -v $KEYPAIR_PATH:/app/keypair.json $IMAGE_NAME:$AGENT_RELEASE show-pubkey)"
 
+  IP_ADDR=$(hostname  -I | cut -f1 -d' ')
+
   say ""
   say "SVT-Agent successfully installed!"
   say "Please add some balance to the agent address."
   say ""
+  say "Cluster: $CLUSTER"
   say "Agent Address(Pubkey): $PUBKEY"
+  say "Host Address: $IP_ADDR"
   say ""
   say "Done"
 }
