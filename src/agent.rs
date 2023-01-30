@@ -383,14 +383,18 @@ impl<'a> Agent<'a> {
 }
 
 async fn check_balance(client: &MessengerClient) -> Result<u64> {
-    let balance = client.get_balance().await;
-    if balance < MIN_BALANCE_REQUIRED {
-        return Err(Error::msg(format!(
-            "Insufficient balance! Required minimum {} lamports.",
-            MIN_BALANCE_REQUIRED
-        )));
+    match client.get_balance().await {
+        Ok(balance) => {
+            if balance < MIN_BALANCE_REQUIRED {
+                return Err(Error::msg(format!(
+                    "Insufficient balance! Required minimum {} lamports.",
+                    MIN_BALANCE_REQUIRED
+                )));
+            }
+            Ok(balance)
+        }
+        Err(e) => Err(e),
     }
-    Ok(balance)
 }
 
 #[cfg(test)]

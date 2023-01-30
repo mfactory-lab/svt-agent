@@ -10,6 +10,7 @@ use anchor_client::solana_sdk::system_program;
 use anchor_client::solana_sdk::transaction::Transaction;
 use anchor_client::Cluster;
 use anchor_lang::prelude::*;
+use anyhow::Error;
 use anyhow::Result;
 use tracing::info;
 
@@ -41,8 +42,11 @@ impl MessengerClient {
     }
 
     /// Retrieve [authority] balance
-    pub async fn get_balance(&self) -> u64 {
-        (self.rpc.get_balance(&self.authority_pubkey()).await).unwrap_or(0)
+    pub async fn get_balance(&self) -> Result<u64> {
+        self.rpc
+            .get_balance(&self.authority_pubkey())
+            .await
+            .map_err(|e| Error::from(e))
     }
 
     #[tracing::instrument(skip(self))]
