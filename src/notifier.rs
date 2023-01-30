@@ -75,8 +75,11 @@ impl NotifierOpts {
 }
 
 pub struct Notifier<'a> {
+    /// The [Task] which will be notified
     task: &'a Task,
+    /// Notifier options
     opts: &'a NotifierOpts,
+    /// Parameters to be sent
     params: HashMap<&'a str, String>,
 }
 
