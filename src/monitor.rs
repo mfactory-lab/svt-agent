@@ -6,7 +6,6 @@ use shiplift::{Container, ContainerOptions, Docker, PullOptions};
 use tracing::info;
 
 const MONITOR_IMAGE: &str = "amir20/dozzle:latest";
-const DEFAULT_USERNAME: &str = "admin";
 const DEFAULT_HOST_PORT: u16 = 8888;
 
 pub struct TaskMonitor<'a, 'b> {
@@ -60,14 +59,13 @@ impl<'a, 'b> TaskMonitor<'a, 'b> {
             .env([
                 "DOZZLE_NO_ANALYTICS=true",
                 &format!(
-                    "DOZZLE_USERNAME={}",
+                    "DOZZLE_BASE=/{}",
                     if !self.opts.password.is_empty() {
-                        self.opts.username
+                        self.opts.password
                     } else {
                         ""
                     }
                 ),
-                &format!("DOZZLE_PASSWORD={}", self.opts.password),
                 &format!("DOZZLE_FILTER=name={}", self.opts.filter),
             ])
             .build();
@@ -104,7 +102,6 @@ impl<'a, 'b> TaskMonitor<'a, 'b> {
 #[derive(Default)]
 pub struct TaskMonitorOptions<'a> {
     port: u16,
-    username: &'a str,
     password: &'a str,
     filter: &'a str,
 }
@@ -112,7 +109,6 @@ pub struct TaskMonitorOptions<'a> {
 impl<'a> TaskMonitorOptions<'a> {
     pub fn new() -> Self {
         Self {
-            username: DEFAULT_USERNAME,
             port: DEFAULT_HOST_PORT,
             ..Default::default()
         }
