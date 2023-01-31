@@ -95,6 +95,7 @@ pub struct TaskRunner {
     docker: Docker,
     /// Sled [Db] instance for state persistence
     db: Option<Db>,
+    /// Runner options
     opts: TaskRunnerOpts,
 }
 
@@ -158,6 +159,7 @@ impl TaskRunner {
         Ok(())
     }
 
+    /// Retrieve the current run state
     pub fn current_state(&self) -> RunState {
         self.state.lock().unwrap().to_owned()
     }

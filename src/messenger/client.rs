@@ -46,7 +46,7 @@ impl MessengerClient {
         self.rpc
             .get_balance(&self.authority_pubkey())
             .await
-            .map_err(|e| Error::from(e))
+            .map_err(Error::from)
     }
 
     #[tracing::instrument(skip(self))]
@@ -121,9 +121,7 @@ impl MessengerClient {
 
     #[tracing::instrument(skip(self))]
     pub async fn load_cek(&self, channel: &Pubkey) -> Result<Vec<u8>> {
-        info!("Loading device...");
         let device = self.load_device(channel).await?;
-        info!("Decrypting CEK...");
         decrypt_cek(device.cek, self.authority.secret().as_bytes())
     }
 
