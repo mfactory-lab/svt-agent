@@ -4,69 +4,65 @@ use crate::messenger::*;
 use crate::task_runner::{RunState, Task, TaskRunner, TaskRunnerOpts};
 use crate::utils::convert_message_to_task;
 use crate::AgentArgs;
+use std::ops::DerefMut;
 
 use anchor_client::solana_client::nonblocking::pubsub_client::{PubsubClient, PubsubClientResult};
 use anchor_client::solana_client::rpc_config::RpcTransactionLogsFilter;
 use anchor_client::solana_sdk::signature::read_keypair_file;
 
 use crate::notifier::NotifierOpts;
+use anchor_lang::prelude::Pubkey;
+use anchor_lang::Event;
 use anyhow::{Error, Result};
 use futures::StreamExt;
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::sync::{mpsc, RwLock};
+use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
+use tokio::sync::{Mutex, RwLock};
 use tokio::task::JoinHandle;
 use tokio::time;
 use tracing::{debug, error, info, warn};
 
-pub struct Agent<'a> {
-    args: &'a AgentArgs,
-    /// Messenger client instance
-    client: Arc<MessengerClient>,
-    /// Task runner instance
+pub struct Agent {
+    ctx: Arc<AgentContext>,
     runner: Arc<RwLock<TaskRunner>>,
 }
 
-impl<'a> Agent<'a> {
+impl Agent {
     #[tracing::instrument]
-    pub fn new(args: &'a AgentArgs) -> Result<Self> {
+    pub fn new(args: &AgentArgs) -> Result<Self> {
         let keypair = read_keypair_file(&args.keypair).expect("Authority keypair file not found");
         let runner = TaskRunner::new(TaskRunnerOpts::new(args));
-        let client = Arc::new(MessengerClient::new(
-            args.cluster.clone(),
-            args.program_id,
-            keypair,
-        ));
+        let client = MessengerClient::new(args.cluster.clone(), args.program_id, keypair);
+        let ctx = AgentContext {
+            client,
+            channel_id: args.channel_id,
+            last_task_id: Default::default(),
+            cek: Default::default(),
+        };
 
         Ok(Self {
-            args,
-            client,
+            ctx: Arc::new(ctx),
             runner: Arc::new(RwLock::new(runner)),
         })
     }
 
-    #[tracing::instrument(skip_all)]
-    pub async fn run(&self) -> Result<()> {
+    fn print_info(&self) {
         info!("Agent Version: {}", env!("CARGO_PKG_VERSION"));
-        info!("Agent ID: {:?}", self.client.authority_pubkey().to_string());
-        info!("Program ID: {:?}", self.args.program_id);
-        info!("Channel ID: {:?}", self.args.channel_id);
-        info!("Cluster: {}", self.client.cluster);
+        info!(
+            "Agent ID: {:?}",
+            self.ctx.client.authority_pubkey().to_string()
+        );
+        info!("Cluster: {}", self.ctx.client.cluster);
+        info!("Program ID: {:?}", self.ctx.client.program_id);
+        info!("Channel ID: {:?}", self.ctx.channel_id);
+    }
+
+    #[tracing::instrument(skip_all)]
+    pub async fn run(&mut self) -> Result<()> {
+        self.print_info();
 
         self.init().await?;
-
-        // Trying to access a channel
-        let cek = loop {
-            match self.authorize().await {
-                Ok(cek) => break cek,
-                Err(e) => {
-                    warn!("Error: {}", e);
-                    time::sleep(Duration::from_millis(WAIT_AUTHORIZATION_INTERVAL)).await;
-                }
-            }
-        };
-
-        // info!("CEK: {:?}", cek);
 
         let (rx_new, tx_new) = mpsc::unbounded_channel::<NewMessageEvent>();
         let (rx_update, tx_update) = mpsc::unbounded_channel::<UpdateMessageEvent>();
@@ -75,104 +71,27 @@ impl<'a> Agent<'a> {
         let (_, _, _) = tokio::join!(
             self.command_runner(),
             self.command_listener(rx_new, rx_update, rx_delete),
-            self.command_processor(tx_new, tx_update, tx_delete, cek),
+            self.command_processor(tx_new, tx_update, tx_delete),
         );
 
         Ok(())
     }
 
     #[tracing::instrument(skip_all)]
-    async fn init(&self) -> Result<()> {
+    async fn init(&mut self) -> Result<()> {
         self.runner.write().await.init().await?;
+
+        loop {
+            match self.ctx.authorize().await {
+                Ok(_) => break,
+                Err(e) => {
+                    warn!("Auth Error: {}", e);
+                    time::sleep(Duration::from_millis(WAIT_AUTHORIZATION_INTERVAL)).await;
+                }
+            }
+        }
+
         Ok(())
-    }
-
-    /// This method try to load the [ChannelMembership] account.
-    /// If the membership doesn't exists, a `join request` will be sent.
-    /// If membership status is authorized, try to load [ChannelDevice] and return the `CEK`.
-    #[tracing::instrument(skip_all)]
-    async fn authorize(&self) -> Result<Vec<u8>> {
-        let membership = self.client.load_membership(&self.args.channel_id).await;
-
-        check_balance(&self.client).await?;
-
-        match membership {
-            Ok(membership) => {
-                if membership.status == ChannelMembershipStatus::Authorized {
-                    let cek = self.client.load_cek(&self.args.channel_id).await?;
-
-                    let initial_commands = self
-                        .load_commands(cek.as_slice(), membership.last_read_message_id)
-                        .await?;
-
-                    info!(
-                        "Added {} initial commands to the queue...",
-                        initial_commands.len()
-                    );
-
-                    for command in initial_commands {
-                        self.runner.write().await.add_task(command);
-                    }
-
-                    return Ok(cek);
-                }
-                Err(Error::msg("Awaiting authorization..."))
-            }
-            Err(e) => {
-                warn!("{}", e);
-                self.client
-                    .join_channel(&self.args.channel_id, Some(AGENT_NAME.to_string()))
-                    .await?;
-                Err(e)
-            }
-        }
-    }
-
-    /// Load commands from the `channel` account.
-    /// Decrypt, convert to the [Task] and filter by `id_from`.
-    #[tracing::instrument(skip(self, cek))]
-    async fn load_commands(&self, cek: &[u8], id_from: u64) -> Result<Vec<Task>> {
-        info!("Loading channel...");
-        let channel = self.client.load_channel(&self.args.channel_id).await?;
-
-        info!("Prepare commands...");
-
-        let mut tasks = vec![];
-        let mut need_reset = true;
-
-        let curr_task_id = match self.runner.read().await.current_state() {
-            RunState::Processing(t) | RunState::Complete(t) | RunState::Error(t) => {
-                info!("Current task id: {}", t.id);
-                t.id
-            }
-            _ => 0,
-        };
-
-        for message in channel.messages {
-            let msg_id = message.id;
-            if msg_id > id_from {
-                if let Ok(task) = convert_message_to_task(message, cek) {
-                    // check that the current task is valid
-                    if task.id == curr_task_id {
-                        need_reset = task.is_skipped();
-                    }
-                    if !task.is_skipped() {
-                        tasks.push(task);
-                    }
-                } else {
-                    warn!("Failed to convert message to task... Message#{}", msg_id);
-                }
-            }
-        }
-
-        if need_reset {
-            info!("Reset current run state");
-            if let Err(e) = self.runner.write().await.reset_state() {
-                warn!("Failed to reset run state... {}", e);
-            }
-        }
-
-        Ok(tasks)
     }
 
     /// This method waits and runs commands from the runner queue at some interval.
@@ -180,13 +99,12 @@ impl<'a> Agent<'a> {
     #[tracing::instrument(skip_all)]
     fn command_runner(&self) -> JoinHandle<()> {
         tokio::spawn({
+            let ctx = self.ctx.clone();
             let runner = self.runner.clone();
-            let client = self.client.clone();
-            let channel_id = self.args.channel_id;
 
             async move {
                 loop {
-                    match check_balance(&client).await {
+                    match check_balance(&ctx.client).await {
                         Ok(balance) => {
                             info!("Balance: {} lamports", balance);
                         }
@@ -211,9 +129,12 @@ impl<'a> Agent<'a> {
                         // previous task was complete, try to confirm it
                         RunState::Complete(task) => {
                             info!("Confirming Task #{}...", task.id);
-                            match client.read_message(task.id, &channel_id).await {
+                            match ctx.client.read_message(task.id, &ctx.channel_id).await {
                                 Ok(sig) => {
                                     info!("Confirmed Task #{}! Signature: {}", task.id, sig);
+
+                                    *ctx.last_task_id.lock().await = task.id;
+
                                     // reset state only if the command is confirmed
                                     let _ = runner.reset_state();
                                 }
@@ -248,16 +169,17 @@ impl<'a> Agent<'a> {
         mut new_receiver: mpsc::UnboundedReceiver<NewMessageEvent>,
         mut update_receiver: mpsc::UnboundedReceiver<UpdateMessageEvent>,
         mut delete_receiver: mpsc::UnboundedReceiver<DeleteMessageEvent>,
-        cek: Vec<u8>,
     ) -> JoinHandle<()> {
         tokio::spawn({
+            let ctx = self.ctx.clone();
             let runner = self.runner.clone();
 
             async move {
                 loop {
                     tokio::select! {
                         Some(e) = new_receiver.recv() => {
-                            match convert_message_to_task(e.message, cek.as_slice()) {
+                            let cek = ctx.cek.lock().await;
+                            match convert_message_to_task(e.message, cek.as_ref()) {
                                 Ok(task) => {
                                     if !task.is_skipped() {
                                         runner.write().await.add_task(task);
@@ -301,7 +223,7 @@ impl<'a> Agent<'a> {
         })
     }
 
-    /// Listen for [NewMessageEvent] events and send them to the `sender`.
+    /// Listen to channel events
     #[tracing::instrument(skip_all)]
     fn command_listener(
         &self,
@@ -310,19 +232,22 @@ impl<'a> Agent<'a> {
         delete_msg_sender: mpsc::UnboundedSender<DeleteMessageEvent>,
     ) -> JoinHandle<()> {
         tokio::spawn({
-            let url = self.client.cluster.ws_url().to_owned();
-            let program_id = self.args.program_id;
-            let filter = RpcTransactionLogsFilter::Mentions(vec![self.args.channel_id.to_string()]);
+            let ctx = self.ctx.clone();
+            let runner = self.runner.clone();
+
+            let url = ctx.client.cluster.ws_url().to_owned();
+            let filter = RpcTransactionLogsFilter::Mentions(vec![ctx.channel_id.to_string()]);
 
             async move {
                 loop {
                     info!("Connecting to `{}`...", url);
 
                     match PubsubClient::new(url.as_str()).await {
-                        Ok(client) => {
+                        Ok(pub_sub_client) => {
                             info!("Waiting a command...");
 
-                            let listener = Listener::new(&program_id, &client, &filter);
+                            let listener =
+                                Listener::new(&ctx.client.program_id, &pub_sub_client, &filter);
 
                             match listener.log_stream().await {
                                 Ok((mut stream, _)) => {
@@ -362,7 +287,7 @@ impl<'a> Agent<'a> {
                                 }
                             }
 
-                            match &client.shutdown().await {
+                            match &pub_sub_client.shutdown().await {
                                 Ok(_) => {}
                                 Err(e) => {
                                     info!("Failed to shutdown client ({})", e);
@@ -375,10 +300,108 @@ impl<'a> Agent<'a> {
                             warn!("{}", e);
                             time::sleep(Duration::from_millis(3000)).await;
                         }
-                    }
+                    };
+
+                    // reload commands
+                    // auth_info.write().await.load().await;
+
+                    ctx.load_tasks(runner.write().await.deref_mut());
                 }
             }
         })
+    }
+}
+
+pub struct AgentContext {
+    /// Messenger client
+    client: MessengerClient,
+    /// Channel with tasks
+    channel_id: Pubkey,
+    /// ID of last successful task
+    last_task_id: Mutex<u64>,
+    /// Content Encryption Key
+    cek: Mutex<Vec<u8>>,
+}
+
+impl AgentContext {
+    #[tracing::instrument(skip_all)]
+    async fn authorize(&self) -> Result<()> {
+        check_balance(&self.client).await?;
+        match self.client.load_membership(&self.channel_id).await {
+            Ok(membership) => {
+                if membership.status == ChannelMembershipStatus::Authorized {
+                    *self.last_task_id.lock().await = membership.last_read_message_id;
+                    *self.cek.lock().await = self.client.load_cek(&self.channel_id).await?;
+                    return Ok(());
+                }
+                Err(Error::msg("Awaiting authorization..."))
+            }
+            Err(e) => {
+                warn!("{}", e);
+                self.client
+                    .join_channel(&self.channel_id, Some(AGENT_NAME.to_string()))
+                    .await?;
+                Err(e)
+            }
+        }
+    }
+
+    /// Load messages from the `channel` account,
+    /// decrypt, convert to the [Task] and add to the runner queue
+    #[tracing::instrument(skip_all)]
+    async fn load_tasks(&self, runner: &mut TaskRunner) -> Result<()> {
+        info!("Loading channel...");
+        let channel = self.client.load_channel(&self.channel_id).await?;
+        let cek = self.cek.lock().await;
+        let id_from = *self.last_task_id.lock().await;
+
+        info!("Prepare tasks...");
+
+        // let mut runner = runner.write().await;
+        let mut tasks = vec![];
+        let mut need_reset = true;
+
+        let curr_task_id = match runner.current_state() {
+            RunState::Processing(t) | RunState::Complete(t) | RunState::Error(t) => {
+                info!("Current task id: {}", t.id);
+                t.id
+            }
+            _ => 0,
+        };
+
+        for message in channel.messages {
+            let msg_id = message.id;
+            if msg_id > id_from {
+                if let Ok(task) = convert_message_to_task(message, cek.as_ref()) {
+                    // check that the current task is valid
+                    if task.id == curr_task_id {
+                        need_reset = task.is_skipped();
+                    }
+                    if !task.is_skipped() {
+                        tasks.push(task);
+                    }
+                } else {
+                    warn!("Failed to convert message to task... Message#{}", msg_id);
+                }
+            }
+        }
+
+        if need_reset {
+            info!("Reset current run state");
+            if let Err(e) = runner.reset_state() {
+                warn!("Failed to reset run state... {}", e);
+            }
+        }
+
+        let mut added = 0;
+        for task in tasks {
+            runner.add_task(task);
+            added += 1;
+        }
+
+        info!("Added {} tasks to the runner queue...", added);
+
+        Ok(())
     }
 }
 
