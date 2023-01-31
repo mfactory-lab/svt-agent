@@ -4,7 +4,6 @@ use crate::messenger::*;
 use crate::task_runner::{RunState, Task, TaskRunner, TaskRunnerOpts};
 use crate::utils::convert_message_to_task;
 use crate::AgentArgs;
-use std::ops::DerefMut;
 
 use anchor_client::solana_client::nonblocking::pubsub_client::{PubsubClient, PubsubClientResult};
 use anchor_client::solana_client::rpc_config::RpcTransactionLogsFilter;
@@ -25,7 +24,6 @@ use tracing::{debug, error, info, warn};
 
 pub struct Agent {
     ctx: Arc<AgentContext>,
-    runner: Arc<RwLock<TaskRunner>>,
 }
 
 impl Agent {
@@ -34,16 +32,15 @@ impl Agent {
         let keypair = read_keypair_file(&args.keypair).expect("Authority keypair file not found");
         let runner = TaskRunner::new(TaskRunnerOpts::new(args));
         let client = MessengerClient::new(args.cluster.clone(), args.program_id, keypair);
-        let ctx = AgentContext {
-            client,
-            channel_id: args.channel_id,
-            last_task_id: Default::default(),
-            cek: Default::default(),
-        };
 
         Ok(Self {
-            ctx: Arc::new(ctx),
-            runner: Arc::new(RwLock::new(runner)),
+            ctx: Arc::new(AgentContext {
+                client,
+                channel_id: args.channel_id,
+                last_task_id: Default::default(),
+                cek: Default::default(),
+                runner: Mutex::new(runner),
+            }),
         })
     }
 
@@ -62,7 +59,7 @@ impl Agent {
     pub async fn run(&mut self) -> Result<()> {
         self.print_info();
 
-        self.init().await?;
+        self.ctx.init().await?;
 
         let (rx_new, tx_new) = mpsc::unbounded_channel::<NewMessageEvent>();
         let (rx_update, tx_update) = mpsc::unbounded_channel::<UpdateMessageEvent>();
@@ -77,30 +74,12 @@ impl Agent {
         Ok(())
     }
 
-    #[tracing::instrument(skip_all)]
-    async fn init(&mut self) -> Result<()> {
-        self.runner.write().await.init().await?;
-
-        loop {
-            match self.ctx.authorize().await {
-                Ok(_) => break,
-                Err(e) => {
-                    warn!("Auth Error: {}", e);
-                    time::sleep(Duration::from_millis(WAIT_AUTHORIZATION_INTERVAL)).await;
-                }
-            }
-        }
-
-        Ok(())
-    }
-
     /// This method waits and runs commands from the runner queue at some interval.
     /// TODO: retry on fail, read_message on fail
     #[tracing::instrument(skip_all)]
     fn command_runner(&self) -> JoinHandle<()> {
         tokio::spawn({
             let ctx = self.ctx.clone();
-            let runner = self.runner.clone();
 
             async move {
                 loop {
@@ -115,7 +94,7 @@ impl Agent {
                         }
                     }
 
-                    let mut runner = runner.write().await;
+                    let mut runner = ctx.runner.lock().await;
 
                     match runner.current_state() {
                         RunState::Processing(task) | RunState::Error(task) => {
@@ -172,7 +151,6 @@ impl Agent {
     ) -> JoinHandle<()> {
         tokio::spawn({
             let ctx = self.ctx.clone();
-            let runner = self.runner.clone();
 
             async move {
                 loop {
@@ -182,7 +160,7 @@ impl Agent {
                             match convert_message_to_task(e.message, cek.as_ref()) {
                                 Ok(task) => {
                                     if !task.is_skipped() {
-                                        runner.write().await.add_task(task);
+                                        ctx.runner.lock().await.add_task(task);
                                     }
                                 }
                                 Err(_) => {
@@ -191,13 +169,13 @@ impl Agent {
                             }
                         }
                         Some(e) = update_receiver.recv() => {
-                            let state = runner.read().await.current_state();
-                            match state {
+                            let mut runner = ctx.runner.lock().await;
+                            match runner.current_state() {
                                 RunState::Error(task) | RunState::Processing(task) => {
                                     if task.is_skipped() {
                                         info!("Task #{} was skipped...", task.id);
                                         if task.id == e.message.id {
-                                            let _ = runner.write().await.reset_state();
+                                            let _ = runner.reset_state();
                                         }
                                     }
                                 },
@@ -205,17 +183,17 @@ impl Agent {
                             }
                         }
                         Some(e) = delete_receiver.recv() => {
-                            let state = runner.read().await.current_state();
-                            match state {
+                            let mut runner = ctx.runner.lock().await;
+                            match runner.current_state() {
                                 RunState::Error(task) | RunState::Processing(task) => {
                                     info!("Task #{} was deleted...", task.id);
                                     if task.id == e.id {
-                                        let _ = runner.write().await.reset_state();
+                                        let _ = runner.reset_state();
                                     }
                                 },
                                 _ => {}
                             }
-                            runner.write().await.delete_task(e.id);
+                            runner.delete_task(e.id);
                         }
                     }
                 }
@@ -233,8 +211,6 @@ impl Agent {
     ) -> JoinHandle<()> {
         tokio::spawn({
             let ctx = self.ctx.clone();
-            let runner = self.runner.clone();
-
             let url = ctx.client.cluster.ws_url().to_owned();
             let filter = RpcTransactionLogsFilter::Mentions(vec![ctx.channel_id.to_string()]);
 
@@ -244,9 +220,7 @@ impl Agent {
 
                     match PubsubClient::new(url.as_str()).await {
                         Ok(pub_sub_client) => {
-                            ctx.load_tasks(runner.write().await.deref_mut());
-
-                            info!("Waiting a command...");
+                            info!("Listen new events...");
 
                             let listener =
                                 Listener::new(&ctx.client.program_id, &pub_sub_client, &filter);
@@ -318,9 +292,27 @@ pub struct AgentContext {
     last_task_id: Mutex<u64>,
     /// Content Encryption Key
     cek: Mutex<Vec<u8>>,
+    runner: Mutex<TaskRunner>,
 }
 
 impl AgentContext {
+    #[tracing::instrument(skip_all)]
+    async fn init(&self) -> Result<()> {
+        self.runner.lock().await.init().await?;
+
+        loop {
+            match self.authorize().await {
+                Ok(_) => break,
+                Err(e) => {
+                    warn!("Auth Error: {}", e);
+                    time::sleep(Duration::from_millis(WAIT_AUTHORIZATION_INTERVAL)).await;
+                }
+            }
+        }
+
+        Ok(())
+    }
+
     #[tracing::instrument(skip_all)]
     async fn authorize(&self) -> Result<()> {
         check_balance(&self.client).await?;
@@ -329,6 +321,7 @@ impl AgentContext {
                 if membership.status == ChannelMembershipStatus::Authorized {
                     *self.last_task_id.lock().await = membership.last_read_message_id;
                     *self.cek.lock().await = self.client.load_cek(&self.channel_id).await?;
+                    info!("Authorized!");
                     return Ok(());
                 }
                 Err(Error::msg("Awaiting authorization..."))
@@ -346,7 +339,7 @@ impl AgentContext {
     /// Load messages from the `channel` account,
     /// decrypt, convert to the [Task] and add to the runner queue
     #[tracing::instrument(skip_all)]
-    async fn load_tasks(&self, runner: &mut TaskRunner) -> Result<()> {
+    async fn load_tasks(&self) -> Result<()> {
         info!("Loading channel...");
         let channel = self.client.load_channel(&self.channel_id).await?;
         let cek = self.cek.lock().await;
@@ -354,9 +347,10 @@ impl AgentContext {
 
         info!("Prepare tasks...");
 
-        // let mut runner = runner.write().await;
         let mut tasks = vec![];
         let mut need_reset = true;
+
+        let mut runner = self.runner.lock().await;
 
         let curr_task_id = match runner.current_state() {
             RunState::Processing(t) | RunState::Complete(t) | RunState::Error(t) => {
@@ -365,6 +359,10 @@ impl AgentContext {
             }
             _ => 0,
         };
+
+        info!("Current task id: {}", curr_task_id);
+
+        info!("Found {} channel messages", channel.messages.len());
 
         for message in channel.messages {
             let msg_id = message.id;
