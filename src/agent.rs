@@ -244,6 +244,8 @@ impl Agent {
 
                     match PubsubClient::new(url.as_str()).await {
                         Ok(pub_sub_client) => {
+                            ctx.load_tasks(runner.write().await.deref_mut());
+
                             info!("Waiting a command...");
 
                             let listener =
@@ -301,11 +303,6 @@ impl Agent {
                             time::sleep(Duration::from_millis(3000)).await;
                         }
                     };
-
-                    // reload commands
-                    // auth_info.write().await.load().await;
-
-                    ctx.load_tasks(runner.write().await.deref_mut());
                 }
             }
         })
