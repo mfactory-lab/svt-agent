@@ -21,11 +21,13 @@ ARG SV_MANAGER_VERSION=latest
 
 RUN curl -sLO https://github.com/mfactory-lab/sv-manager/archive/refs/tags/${SV_MANAGER_VERSION}.tar.gz \
   && tar -xvf latest.tar.gz --strip-components=1 \
+  && rm latest.tar.gz \
   && mv inventory_example inventory
 
 #FROM gcr.io/distroless/cc
 #FROM gcr.io/distroless/cc-debian1
-FROM debian:bullseye-slim AS runtime
+#FROM debian:bullseye-slim
+FROM scratch
 
 WORKDIR app
 
