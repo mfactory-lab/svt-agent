@@ -360,8 +360,6 @@ impl AgentContext {
             _ => 0,
         };
 
-        info!("Current task id: {}", curr_task_id);
-
         info!("Found {} channel messages", channel.messages.len());
 
         for message in channel.messages {
