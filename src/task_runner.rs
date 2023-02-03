@@ -255,11 +255,14 @@ impl TaskRunner {
             }
 
             if let Some(code) = status_code {
-                let _ = self.set_state(if code == 0 {
-                    RunState::Complete(task.clone())
+                if code == 0 {
+                    let _ = self.set_state(RunState::Complete(task.clone()));
                 } else {
-                    RunState::Error(task.clone())
-                });
+                    let _ = self.set_state(RunState::Error(task.clone()));
+                    let _ = notifier
+                        .notify_error(&Error::msg(format!("Error: status code {}", code)))
+                        .await;
+                }
                 return Ok(self.current_state());
             }
         }
