@@ -13,6 +13,9 @@ FROM chef AS builder
 COPY . .
 COPY --from=cacher /app/target target
 COPY --from=cacher /usr/local/cargo /usr/local/cargo
+
+RUN mkdir -p logs
+
 RUN cargo build --release
 
 FROM chef AS sv_manager
@@ -24,18 +27,17 @@ RUN curl -sLO https://github.com/mfactory-lab/sv-manager/archive/refs/tags/${SV_
   && rm latest.tar.gz \
   && mv inventory_example inventory
 
-FROM gcr.io/distroless/cc
+#FROM gcr.io/distroless/cc
 #FROM gcr.io/distroless/cc-debian1
 #FROM debian:bullseye-slim
-#FROM scratch
+FROM scratch
 
 WORKDIR app
 
 COPY --from=builder /app/target/release/svt-agent /usr/local/bin/svt-agent
+COPY --from=builder /app/logs ./
 COPY --from=sv_manager /app ./ansible
 COPY ./ansible/ ./ansible
-
-RUN mkdir -p logs
 
 ENV RUST_LOG=info
 ENV RUST_BACKTRACE=1
