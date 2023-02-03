@@ -13,7 +13,8 @@ on:
   push:
     branches: [ main ]
     paths:
-      - src/**
+      - Cargo.toml
+#      - src/**
   workflow_dispatch:
 
 env:
