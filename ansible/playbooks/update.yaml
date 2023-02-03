@@ -2,7 +2,7 @@
   hosts: localhost
   connection: local
   vars:
-    base_image: mfactory-lab/svt-agent
+    base_image: ghcr.io/mfactory-lab/svt-agent
     container_name: svt-agent
   tasks:
     - name: Download new image
