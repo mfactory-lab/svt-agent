@@ -102,8 +102,8 @@ impl<'a> Notifier<'a> {
         self.notify("finish").await
     }
 
-    pub async fn notify_error(&mut self, error: &'a Error) -> Result<()> {
-        self.params.insert("error", error.to_string());
+    pub async fn notify_error<E: Into<String>>(&mut self, error: E) -> Result<()> {
+        self.params.insert("error", error.into());
         self.notify("error").await
     }
 

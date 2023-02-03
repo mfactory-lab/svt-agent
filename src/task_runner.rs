@@ -220,16 +220,23 @@ impl TaskRunner {
 
                     // retrieve task output only if status code is present
                     if let Some(status_code) = status_code {
-                        let output = get_container_logs(
-                            &container,
-                            match status_code {
-                                0 => ContainerLogFlags::StdOut,
-                                1 => ContainerLogFlags::StdErr,
-                                _ => ContainerLogFlags::All,
-                            },
-                        )
-                        .await;
-                        let _ = notifier.notify_finish(status_code, output).await;
+                        if status_code == 0 {
+                            let _ = self.set_state(RunState::Complete(task.clone()));
+                            let output =
+                                get_container_logs(&container, ContainerLogFlags::StdOut).await;
+                            let _ = notifier.notify_finish(status_code, output).await;
+                        } else {
+                            let _ = self.set_state(RunState::Error(task.clone()));
+                            let output = get_container_logs(
+                                &container,
+                                match status_code {
+                                    1 => ContainerLogFlags::StdErr,
+                                    _ => ContainerLogFlags::All,
+                                },
+                            )
+                            .await;
+                            let _ = notifier.notify_error(output).await;
+                        }
                     }
 
                     if let Err(e) = container.delete().await {
@@ -250,24 +257,12 @@ impl TaskRunner {
 
             if let Some(e) = internal_error {
                 let _ = self.set_state(RunState::Error(task.clone()));
-                let _ = notifier.notify_error(&e).await;
+                let _ = notifier.notify_error(e.to_string()).await;
                 return Err(e);
-            }
-
-            if let Some(code) = status_code {
-                if code == 0 {
-                    let _ = self.set_state(RunState::Complete(task.clone()));
-                } else {
-                    let _ = self.set_state(RunState::Error(task.clone()));
-                    let _ = notifier
-                        .notify_error(&Error::msg(format!("Error: status code {}", code)))
-                        .await;
-                }
-                return Ok(self.current_state());
             }
         }
 
-        Ok(RunState::Pending)
+        Ok(self.current_state())
     }
 
     /// Run the [task] isolated through docker container
