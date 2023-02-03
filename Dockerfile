@@ -24,10 +24,10 @@ RUN curl -sLO https://github.com/mfactory-lab/sv-manager/archive/refs/tags/${SV_
   && rm latest.tar.gz \
   && mv inventory_example inventory
 
-#FROM gcr.io/distroless/cc
+FROM gcr.io/distroless/cc
 #FROM gcr.io/distroless/cc-debian1
 #FROM debian:bullseye-slim
-FROM scratch
+#FROM scratch
 
 WORKDIR app
 
