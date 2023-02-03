@@ -73,6 +73,8 @@ do_install() {
   say "Starting docker container..."
   CONTAINER_ID="$(docker run -d -it --restart=always --name $CONTAINER_NAME \
     --hostname $CONTAINER_NAME \
+    --log-opt max-size=10m \
+    --log-opt max-file=5 \
     -v /var/run/docker.sock:/var/run/docker.sock \
     -v svt-agent-ansible:/app/ansible \
     -v $SSHKEY_PATH:/root/.ssh \
