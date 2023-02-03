@@ -11,10 +11,22 @@
       "name": "pb_config",
       "desc": "install or update config file",
       "args": [
-        "validator_name",
-        "local_secrets_path",
-        "swap_file_size_gb",
-        "ramdisk_size_gb"
+        {
+          "name": "validator_name",
+          "rules": "max:64"
+        },
+        {
+          "name": "local_secrets_path",
+          "rules": "max:128"
+        },
+        {
+          "name": "swap_file_size_gb",
+          "rules": "max:32,alphanumeric"
+        },
+        {
+          "name": "ramdisk_size_gb",
+          "rules": "max:32,alphanumeric"
+        }
       ]
     },
     {
@@ -35,11 +47,22 @@
       "name": "pb_install_validator",
       "desc": "install solana validator",
       "args": [
-        "validator_name",
-        "solana_user",
-        "solana_version",
-        "secrets_path",
-        "@/etc/sv_manager/sv_manager.conf"
+        {
+          "name": "validator_name",
+          "rules": "max:64"
+        },
+        {
+          "name": "solana_user",
+          "rules": "max:64,alphanumeric"
+        },
+        {
+          "name": "solana_version",
+          "rules": "regex:^(?:(\\d+)\\.)?(?:(\\d+)\\.)?(\\*|\\d+)$"
+        },
+        {
+          "name": "local_secrets_path",
+          "rules": "max:128"
+        },
       ]
     },
     {
