@@ -160,6 +160,7 @@ impl Agent {
                             match convert_message_to_task(e.message, cek.as_ref()) {
                                 Ok(task) => {
                                     if !task.is_skipped() {
+                                        info!("Task #{} was added...", task.id);
                                         ctx.runner.lock().await.add_task(task);
                                     }
                                 }
@@ -172,10 +173,18 @@ impl Agent {
                             let mut runner = ctx.runner.lock().await;
                             match runner.current_state() {
                                 RunState::Error(task) | RunState::Processing(task) => {
-                                    if task.is_skipped() {
-                                        info!("Task #{} was skipped...", task.id);
-                                        if task.id == e.message.id {
-                                            let _ = runner.reset_state();
+                                    let cek = ctx.cek.lock().await;
+                                    match convert_message_to_task(e.message, cek.as_ref()) {
+                                        Ok(new_task) => {
+                                            if new_task.is_skipped() {
+                                                info!("Task #{} was skipped...", new_task.id);
+                                                if task.id == new_task.id {
+                                                    let _ = runner.reset_state();
+                                                }
+                                            }
+                                        }
+                                        Err(_) => {
+                                            info!("Failed to convert message to task");
                                         }
                                     }
                                 },
@@ -230,7 +239,7 @@ impl Agent {
                                     while let Some(log) = stream.next().await {
                                         listener
                                             .on::<NewMessageEvent>(&log, &|evt| {
-                                                debug!("{:?}", evt);
+                                                info!("{:?}", evt);
                                                 if let Err(e) = new_msg_sender.send(evt) {
                                                     warn!(
                                                         "[NewMessageEvent] Failed to send... {}",
@@ -239,7 +248,7 @@ impl Agent {
                                                 }
                                             })
                                             .on::<DeleteMessageEvent>(&log, &|evt| {
-                                                debug!("{:?}", evt);
+                                                info!("{:?}", evt);
                                                 if let Err(e) = delete_msg_sender.send(evt) {
                                                     warn!(
                                                         "[DeleteMessageEvent] Failed to send... {}",
@@ -248,7 +257,7 @@ impl Agent {
                                                 }
                                             })
                                             .on::<UpdateMessageEvent>(&log, &|evt| {
-                                                debug!("{:?}", evt);
+                                                info!("{:?}", evt);
                                                 if let Err(e) = update_msg_sender.send(evt) {
                                                     warn!(
                                                         "[UpdateMessageEvent] Failed to send... {}",
