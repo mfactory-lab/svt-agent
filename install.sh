@@ -62,7 +62,7 @@ do_install() {
     say "Agent keypair already exits ($KEYPAIR_PATH)"
   else
     KEYPAIR="$(docker run --rm -it $IMAGE_NAME:$AGENT_RELEASE generate-keypair)"
-    echo $KEYPAIR > $KEYPAIR_PATH
+    echo $KEYPAIR >$KEYPAIR_PATH
     say "Added new agent keypair ($KEYPAIR_PATH)"
   fi
 
@@ -89,7 +89,7 @@ do_install() {
 
   PUBKEY="$(docker run --rm -it -v $KEYPAIR_PATH:/app/keypair.json $IMAGE_NAME:$AGENT_RELEASE show-pubkey)"
 
-  IP_ADDR=$(hostname  -I | cut -f1 -d' ')
+  IP_ADDR=$(hostname -I | cut -f1 -d' ')
 
   say ""
   say "SVT-Agent successfully installed!"
@@ -104,13 +104,13 @@ do_install() {
 
 generate_sshkey() {
   if [[ -f $SSHKEY_PATH/$@ ]]; then
-      say "SSH Keyfile already exists - skipping"
+    say "SSH Keyfile already exists - skipping"
   else
-      mkdir -p $SSHKEY_PATH
-      ssh-keygen -t rsa -b 4096 -f $SSHKEY_PATH/$@ -q -N '' -C 'svt-agent'
-      chmod 600 $SSHKEY_PATH/$@
-      cat $SSHKEY_PATH/$@.pub >> ~/.ssh/authorized_keys
-      say "SSH Keyfile was generated"
+    mkdir -p $SSHKEY_PATH
+    ssh-keygen -t rsa -b 4096 -f "$SSHKEY_PATH/$@" -q -N '' -C 'svt-agent'
+    chmod 600 "$SSHKEY_PATH/$@"
+    cat "$SSHKEY_PATH/$@.pub" >>~/.ssh/authorized_keys
+    say "SSH Keyfile was generated"
   fi
 }
 
@@ -123,30 +123,30 @@ is_valid_cluster() {
 }
 
 check_cmd() {
-    command -v "$1" > /dev/null 2>&1
+  command -v "$1" >/dev/null 2>&1
 }
 
 say() {
-    printf 'svt-agent: %s\n' "$1"
+  printf 'svt-agent: %s\n' "$1"
 }
 
 err() {
-    say "$1" >&2
-    exit 1
+  say "$1" >&2
+  exit 1
 }
 
 # Run a command that should never fail. If the command fails execution
 # will immediately terminate with an error showing the failing
 # command.
 ensure() {
-    if ! "$@"; then err "command failed: $*"; fi
+  if ! "$@"; then err "command failed: $*"; fi
 }
 
 # This is just for indicating that commands' results are being
 # intentionally ignored. Usually, because it's being executed
 # as part of error handling.
 ignore() {
-    "$@"
+  "$@"
 }
 
 # wrapped up in a function so that we have some protection against only getting
