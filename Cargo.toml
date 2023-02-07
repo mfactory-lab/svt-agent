@@ -1,27 +1,25 @@
 [package]
 name = "svt-agent"
 description = ""
-version = "0.1.13"
+version = "0.1.14"
 authors = ["Vladyslav Korniienko <vk.tiamo@gmail.com>"]
 repository = "https://github.com/mfactory-lab/svt-agent"
 edition = "2021"
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
-
 [dependencies]
-anyhow = "^1.0.66"
-clap = { version = "^4.0.29", features = ["derive", "env"] }
-chrono = { version = "^0.4.1", features = ["clock"] }
+anyhow = "^1.0"
+clap = { version = "^4.0", features = ["derive", "env"] }
+chrono = { version = "^0.4", features = ["clock"] }
 anchor-client = "^0.25.0"
 anchor-lang = "^0.25.0"
 hyper = { version = "0.14", features = ["client"] }
-tokio = "^1.22.0"
-tracing = "^0.1.37"
-tracing-subscriber = { version = "^0.3.16", features = ["env-filter"] }
-tracing-tree = "^0.2.2"
-futures = "0.3.25"
-regex = "^1.7.0"
-sha2 = "^0.10.6"
+tokio = "^1.22"
+tracing = "^0.1"
+tracing-subscriber = { version = "^0.3", features = ["env-filter"] }
+tracing-tree = "^0.2"
+futures = "0.3"
+regex = "^1.7"
+sha2 = "^0.10"
 chacha20poly1305 = "0.9"
 curve25519-dalek = { version = "^3.2", default-features = false }
 x25519-dalek = "^1.2.0"
