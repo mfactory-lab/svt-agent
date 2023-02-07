@@ -174,6 +174,7 @@ impl<'a> Notifier<'a> {
         if !self.opts.webhook_url.is_empty() {
             let client = hyper::Client::new();
             let mut params = self.params.clone();
+            params.insert("agent_version", env!("CARGO_PKG_VERSION").to_string());
             params.insert("cluster", self.opts.cluster.to_string());
             params.insert("channel_id", self.opts.channel_id.to_string());
             params.insert("task_id", self.task.id.to_string());
