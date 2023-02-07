@@ -9,7 +9,6 @@ use anchor_client::solana_client::nonblocking::pubsub_client::{PubsubClient, Pub
 use anchor_client::solana_client::rpc_config::RpcTransactionLogsFilter;
 use anchor_client::solana_sdk::signature::read_keypair_file;
 
-use crate::notifier::NotifierOpts;
 use anchor_lang::prelude::Pubkey;
 use anchor_lang::Event;
 use anyhow::{Error, Result};
@@ -179,6 +178,7 @@ impl Agent {
                                             if new_task.is_skipped() {
                                                 info!("Task #{} was skipped...", new_task.id);
                                                 if task.id == new_task.id {
+                                                    runner.notify_skip(&task);
                                                     let _ = runner.reset_state();
                                                 }
                                             }
@@ -412,8 +412,7 @@ async fn check_balance(client: &MessengerClient) -> Result<u64> {
         Ok(balance) => {
             if balance < MIN_BALANCE_REQUIRED {
                 return Err(Error::msg(format!(
-                    "Insufficient balance! Required minimum {} lamports.",
-                    MIN_BALANCE_REQUIRED
+                    "Insufficient balance! Required minimum {MIN_BALANCE_REQUIRED} lamports."
                 )));
             }
             Ok(balance)

@@ -9,6 +9,7 @@ use influxdb::{InfluxDbWriteable, ReadQuery, Timestamp};
 use serde_json::json;
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::str::FromStr;
 use tokio::fs::OpenOptions;
 use tokio::io::AsyncWriteExt;
 use tracing::{error, info, warn};
@@ -108,7 +109,7 @@ impl<'a> Notifier<'a> {
     }
 
     #[tracing::instrument(skip_all)]
-    async fn notify(&self, event: &str) -> Result<()> {
+    pub async fn notify(&self, event: &str) -> Result<()> {
         info!("Task #{} notify({})", self.task.id, event);
 
         let (save_result, influx_result, webhook_result) = tokio::join!(
@@ -172,7 +173,6 @@ impl<'a> Notifier<'a> {
     async fn notify_webhook<T: Into<String>>(&self, event: T) -> Result<()> {
         if !self.opts.webhook_url.is_empty() {
             let client = hyper::Client::new();
-
             let mut params = self.params.clone();
             params.insert("cluster", self.opts.cluster.to_string());
             params.insert("channel_id", self.opts.channel_id.to_string());
@@ -212,6 +212,7 @@ impl<'a> Notifier<'a> {
             .add_field("channel_id", self.opts.channel_id.to_string())
             .add_field("task_id", self.task.id)
             .add_field("task_name", self.task.name.to_string())
+            .add_field("agent_version", env!("CARGO_PKG_VERSION"))
             .add_tag("event", event.into());
 
         info!("[Influx] Request `{:?}` ...", write_query);

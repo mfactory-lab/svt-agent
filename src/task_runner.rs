@@ -340,6 +340,14 @@ impl TaskRunner {
         self.queue.push_back(task);
     }
 
+    pub async fn notify_skip(&self, task: &Task) -> Result<()> {
+        let notifier_opts = NotifierOpts::new()
+            .with_cluster(self.opts.cluster.clone())
+            .with_channel_id(self.opts.channel_id);
+        let mut notifier = Notifier::new(&notifier_opts, task);
+        notifier.notify("skip").await
+    }
+
     /// Delete [task] from the queue
     pub fn delete_task(&mut self, task_id: u64) {
         self.queue.retain(|t| t.id != task_id);
