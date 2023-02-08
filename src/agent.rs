@@ -178,7 +178,9 @@ impl Agent {
                                             if new_task.is_skipped() {
                                                 info!("Task #{} was skipped...", new_task.id);
                                                 if task.id == new_task.id {
-                                                    runner.notify_skip(&task);
+                                                    if runner.notify_skip(&task).await.is_err() {
+                                                        info!("Failed to send skip notify...");
+                                                    }
                                                     let _ = runner.reset_state();
                                                 }
                                             }
