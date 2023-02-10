@@ -309,15 +309,22 @@ impl TaskRunner {
             .working_dir("/app/ansible")
             .cmd(vec![
                 "ansible-playbook",
-                "--connection=local",
-                "--limit=localhost",
-                &format!("--inventory=./inventory/{}.yaml", self.opts.cluster),
+                // "--limit=localhost",
+                // &format!("--inventory=./inventory/{}.yaml", self.opts.cluster),
+                "-i=\"127.0.0.1,\"",
+                "--extra-vars=\"@./inventory/group_vars/all.yml\"",
+                &format!(
+                    "--extra-vars=\"@./inventory/group_vars/{}_validators.yaml\"",
+                    self.opts.cluster
+                ),
                 &format!("--extra-vars={}", json!(task.args)),
                 &format!("./playbooks/{}.yaml", task.name),
                 // "-vvv",
             ])
             .env(["ANSIBLE_HOST_KEY_CHECKING=False"])
             .build();
+
+        // docker run ansible-playbook --volumes-from=svt-agent ansible-playbook --limit=localhost --inventory=./inventory/testnet.yaml /playbooks/pb_config.yaml
 
         info!("Creating task container... {:?}", &options);
         let info = self.docker.containers().create(&options).await?;
