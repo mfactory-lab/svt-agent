@@ -1,21 +1,25 @@
 - name: Update Agent
-  hosts: localhost
-  connection: local
+  hosts: all
+
   vars:
-    base_image: ghcr.io/mfactory-lab/svt-agent
+    base_image: ghcr.io/mfactory-lab/svt-agent:{{ version|default(latest) }}
     container_name: svt-agent
+
   tasks:
-    - name: Download new image
+    - name: Pull new image
       docker_image:
         name: {{ base_image }}
         source: pull
+
     - name: Restart container
       docker_container:
-        name: {{ container_name }}
         image: {{ base_image }}
-        state: started
+        name: {{ container_name }}
         restart: yes
-#      local_action: command docker container restart {{ container_name }}
+        state: started
+        stop_timeout: 1
+        force_kill: yes
+
 #    - name: Start a container
 #      docker_container:
 #        name: {{ container_name }}
