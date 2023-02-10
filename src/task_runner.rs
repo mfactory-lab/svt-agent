@@ -11,7 +11,8 @@ use shiplift::tty::TtyChunk;
 use shiplift::{Container, ContainerOptions, Docker, LogsOptions, PullOptions};
 use sled::Db;
 use std::collections::{HashMap, VecDeque};
-use std::path::PathBuf;
+use std::env;
+use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::time::Duration;
 use tokio::time;
@@ -289,42 +290,37 @@ impl TaskRunner {
         //     .await
         //     .expect("Failed to inspect container");
 
+        let working_dir = "/app/ansible";
+
+        let mut cmd = vec![
+            "ansible-playbook".to_string(),
+            // "--limit=localhost",
+            // &format!("--inventory=./inventory/{}.yaml", self.opts.cluster),
+            format!(
+                "--inventory=\"{},\"",
+                env::var("DOCKER_HOST_IP").unwrap_or("localhost".to_string())
+            ),
+        ];
+        for file in &[
+            "all.yml".to_string(),
+            format!("{}_validators.yaml", self.opts.cluster),
+        ] {
+            let file = format!("{working_dir}/inventory/group_vars/{file}");
+            if Path::new(&file).exists() {
+                cmd.push(format!("--extra-vars=\"@{file}\""));
+            }
+        }
+        cmd.push(format!("--extra-vars={}", json!(task.args)));
+        cmd.push(format!("./playbooks/{}.yaml", task.name));
+
         let options = ContainerOptions::builder(ANSIBLE_IMAGE)
             .name(&self.opts.container_name)
             .network_mode("host")
-            // can't get container logs with auto_remove = true
-            // .auto_remove(true)
-            // .tty(true)
-            // .privileged(true)
-            // for local tests...
-            // .volumes(vec![
-            //     &format!(
-            //         "{}:/app/ansible:ro",
-            //         self.opts.working_dir.to_str().unwrap()
-            //     ),
-            //     "/Users/tiamo/.ssh/id_rsa:/root/.ssh/id_rsa:ro",
-            //     // "~/.ansible/roles:/root/.ansible/roles",
-            // ])
             .volumes_from(vec![CONTAINER_NAME])
-            .working_dir("/app/ansible")
-            .cmd(vec![
-                "ansible-playbook",
-                // "--limit=localhost",
-                // &format!("--inventory=./inventory/{}.yaml", self.opts.cluster),
-                "-i=\"127.0.0.1,\"",
-                "--extra-vars=\"@./inventory/group_vars/all.yml\"",
-                &format!(
-                    "--extra-vars=\"@./inventory/group_vars/{}_validators.yaml\"",
-                    self.opts.cluster
-                ),
-                &format!("--extra-vars={}", json!(task.args)),
-                &format!("./playbooks/{}.yaml", task.name),
-                // "-vvv",
-            ])
+            .working_dir(working_dir)
+            .cmd(cmd.iter().map(|c| c.as_str()).collect())
             .env(["ANSIBLE_HOST_KEY_CHECKING=False"])
             .build();
-
-        // docker run ansible-playbook --volumes-from=svt-agent ansible-playbook --limit=localhost --inventory=./inventory/testnet.yaml /playbooks/pb_config.yaml
 
         info!("Creating task container... {:?}", &options);
         let info = self.docker.containers().create(&options).await?;
