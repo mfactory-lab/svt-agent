@@ -62,7 +62,7 @@
         {
           "name": "local_secrets_path",
           "rules": "max:128"
-        },
+        }
       ]
     },
     {
