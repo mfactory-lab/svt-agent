@@ -197,7 +197,6 @@ impl Agent {
                             let mut runner = ctx.runner.lock().await;
                             match runner.current_state() {
                                 RunState::Error(task) | RunState::Processing(task) => {
-                                    info!("Task #{} was deleted...", task.id);
                                     if task.id == e.id {
                                         let _ = runner.reset_state();
                                     }
@@ -205,6 +204,7 @@ impl Agent {
                                 _ => {}
                             }
                             runner.delete_task(e.id);
+                            info!("Task #{} was deleted...", e.id);
                         }
                     }
                 }
@@ -231,11 +231,13 @@ impl Agent {
 
                     match PubsubClient::new(url.as_str()).await {
                         Ok(pub_sub_client) => {
-                            info!("Listen new events...");
+                            info!("Loading tasks...");
+                            ctx.load_tasks().await;
 
                             let listener =
                                 Listener::new(&ctx.client.program_id, &pub_sub_client, &filter);
 
+                            info!("Listen new events...");
                             match listener.log_stream().await {
                                 Ok((mut stream, _)) => {
                                     while let Some(log) = stream.next().await {
@@ -402,6 +404,8 @@ impl AgentContext {
             runner.add_task(task);
             added += 1;
         }
+
+        runner.dedup();
 
         info!("Added {} tasks to the runner queue...", added);
 

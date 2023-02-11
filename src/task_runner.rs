@@ -10,7 +10,7 @@ use serde_json::json;
 use shiplift::tty::TtyChunk;
 use shiplift::{Container, ContainerOptions, Docker, LogsOptions, PullOptions};
 use sled::Db;
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::env;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
@@ -336,6 +336,12 @@ impl TaskRunner {
         }
 
         Ok(container)
+    }
+
+    /// Deduplicate the [queue]
+    pub fn dedup(&mut self) {
+        let mut uniques = HashSet::new();
+        self.queue.retain(|e| uniques.insert(e.id));
     }
 
     /// Add new [task] to the [queue]
