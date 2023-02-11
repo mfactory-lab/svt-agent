@@ -2,19 +2,19 @@
   hosts: all
 
   vars:
-    base_image: ghcr.io/mfactory-lab/svt-agent:{{ version | default("latest") }}
     container_name: svt-agent
+    image_name: ghcr.io/mfactory-lab/svt-agent:latest
 
   tasks:
     - name: Pull new image
       docker_image:
-        name: "{{ base_image }}"
+        name: "{{ image_name }}"
         source: pull
 
     - name: Restart container
       docker_container:
-        image: "{{ base_image }}"
         name: "{{ container_name }}"
+        image: "{{ image_name }}"
         restart: yes
         state: started
         stop_timeout: 1
@@ -22,8 +22,8 @@
 
 #    - name: Start a container
 #      docker_container:
-#        name: {{ container_name }}
-#        image: {{ base_image }}
+#        name: "{{ container_name }}"
+#        image: "{{ image_name }}"
 #        state: started
 #        restart: yes
 #        detach: yes
