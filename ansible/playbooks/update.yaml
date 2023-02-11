@@ -2,7 +2,7 @@
   hosts: all
 
   vars:
-    base_image: ghcr.io/mfactory-lab/svt-agent:{{ version | default(latest) }}
+    base_image: ghcr.io/mfactory-lab/svt-agent:{{ version | default("latest") }}
     container_name: svt-agent
 
   tasks:
