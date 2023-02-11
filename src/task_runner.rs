@@ -297,7 +297,7 @@ impl TaskRunner {
             // "--limit=localhost",
             // &format!("--inventory=./inventory/{}.yaml", self.opts.cluster),
             format!(
-                "--inventory=\"{},\"",
+                "--inventory='{},'",
                 env::var("DOCKER_HOST_IP").unwrap_or("localhost".to_string())
             ),
         ];
