@@ -307,7 +307,7 @@ impl TaskRunner {
         ] {
             let file = format!("{working_dir}/inventory/group_vars/{file}");
             if Path::new(&file).exists() {
-                cmd.push(format!("--extra-vars=\"@{file}\""));
+                cmd.push(format!("--extra-vars='@{file}'"));
             }
         }
         cmd.push(format!("--extra-vars={}", json!(task.args)));
@@ -344,9 +344,19 @@ impl TaskRunner {
         self.queue.retain(|e| uniques.insert(e.id));
     }
 
+    /// Clear the [queue]
+    pub fn clear(&mut self) {
+        self.queue.clear()
+    }
+
     /// Add new [task] to the [queue]
     pub fn add_task(&mut self, task: Task) {
         self.queue.push_back(task);
+    }
+
+    /// Delete [task] from the queue
+    pub fn delete_task(&mut self, task_id: u64) {
+        self.queue.retain(|t| t.id != task_id);
     }
 
     pub async fn notify_skip(&self, task: &Task) -> Result<()> {
@@ -355,16 +365,6 @@ impl TaskRunner {
             .with_channel_id(self.opts.channel_id);
         let mut notifier = Notifier::new(&notifier_opts, task);
         notifier.notify("skip").await
-    }
-
-    /// Delete [task] from the queue
-    pub fn delete_task(&mut self, task_id: u64) {
-        self.queue.retain(|t| t.id != task_id);
-    }
-
-    /// Clear the [queue]
-    pub fn clear(&mut self) {
-        self.queue.clear()
     }
 
     pub fn reset_state(&self) -> Result<()> {
