@@ -307,7 +307,7 @@ impl TaskRunner {
         ] {
             let file = format!("{working_dir}/inventory/group_vars/{file}");
             if Path::new(&file).exists() {
-                cmd.push(format!("--extra-vars='@{file}'"));
+                cmd.push(format!("--extra-vars=@{file}"));
             }
         }
         cmd.push(format!("--extra-vars={}", json!(task.args)));
