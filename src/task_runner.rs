@@ -13,8 +13,8 @@ use sled::Db;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::env;
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
 use std::time::Duration;
+use tokio::sync::{Mutex, MutexGuard};
 use tokio::time;
 use tracing::info;
 use tracing::{error, warn};
@@ -134,7 +134,7 @@ impl TaskRunner {
         let home = self.opts.working_dir.to_str().unwrap();
         self.db = Some(sled::open(format!("{}/db", home))?);
 
-        if let Err(e) = self.load_state() {
+        if let Err(e) = self.load_state().await {
             info!("Failed to load initial state. {}", e);
         }
 
@@ -161,8 +161,8 @@ impl TaskRunner {
     }
 
     /// Retrieve the current run state
-    pub fn current_state(&self) -> RunState {
-        self.state.lock().unwrap().to_owned()
+    pub async fn current_state(&self) -> RunState {
+        self.state.lock().await.to_owned()
     }
 
     /// Try to run the front task from the [queue] and start the monitor instance if needed.
@@ -183,15 +183,14 @@ impl TaskRunner {
             match self.run_task(&task).await {
                 Ok(container) => {
                     let _ = notifier.notify_start().await;
-
                     let _ = self.set_state(RunState::Processing(task.clone()));
 
-                    let opts = TaskMonitorOptions::new()
+                    let monitor_opts = TaskMonitorOptions::new()
                         .filter(self.opts.container_name.as_ref())
                         .port(self.opts.monitor_port)
-                        .password(&task.secret);
+                        .secret(&task.secret);
 
-                    let mut monitor = TaskMonitor::new(&opts, &self.docker);
+                    let mut monitor = TaskMonitor::new(&monitor_opts, &self.docker);
 
                     let monitor_start_timeout =
                         time::sleep(Duration::from_millis(self.opts.monitor_start_timeout_ms));
@@ -263,7 +262,7 @@ impl TaskRunner {
             }
         }
 
-        Ok(self.current_state())
+        Ok(self.current_state().await)
     }
 
     /// Run the [task] isolated through docker container
@@ -298,7 +297,7 @@ impl TaskRunner {
             // &format!("--inventory=./inventory/{}.yaml", self.opts.cluster),
             format!(
                 "--inventory={},",
-                env::var("DOCKER_HOST_IP").unwrap_or("localhost".to_string())
+                env::var("DOCKER_HOST").unwrap_or("localhost".to_string())
             ),
         ];
         for file in &[
@@ -323,8 +322,8 @@ impl TaskRunner {
             .build();
 
         info!("Creating task container... {:?}", &options);
-        let info = self.docker.containers().create(&options).await?;
-        let container = self.docker.containers().get(&info.id);
+        let create_info = self.docker.containers().create(&options).await?;
+        let container = self.docker.containers().get(&create_info.id);
         info!("Container Id:{:?}", container.id());
 
         info!("Starting task container...");
@@ -351,6 +350,8 @@ impl TaskRunner {
 
     /// Add new [task] to the [queue]
     pub fn add_task(&mut self, task: Task) {
+        // prevent task duplication
+        self.delete_task(task.id);
         self.queue.push_back(task);
     }
 
@@ -359,37 +360,40 @@ impl TaskRunner {
         self.queue.retain(|t| t.id != task_id);
     }
 
-    pub async fn notify_skip(&self, task: &Task) -> Result<()> {
-        let notifier_opts = NotifierOpts::new()
+    pub async fn notify_event(&self, task: &Task, event: &str) -> Result<()> {
+        let opts = NotifierOpts::new()
             .with_cluster(self.opts.cluster.clone())
             .with_channel_id(self.opts.channel_id);
-        let mut notifier = Notifier::new(&notifier_opts, task);
-        notifier.notify("skip").await
+        Notifier::new(&opts, task).notify(event).await
     }
 
-    pub fn reset_state(&self) -> Result<()> {
-        self.set_state(RunState::default())
+    #[tracing::instrument(skip(self))]
+    pub async fn reset_state(&self) -> Result<()> {
+        self.set_state(RunState::default()).await
     }
 
-    fn set_state(&self, state: RunState) -> Result<()> {
+    #[tracing::instrument(skip(self))]
+    async fn set_state(&self, state: RunState) -> Result<()> {
         info!("New state... {:?}", state);
-        *self.state.lock().unwrap() = state;
-        self.sync_state()
+        *self.state.lock().await = state;
+        self.sync_state().await
     }
 
-    fn load_state(&mut self) -> Result<()> {
+    #[tracing::instrument(skip(self))]
+    async fn load_state(&self) -> Result<()> {
         if let Some(db) = &self.db {
             let bytes = db.get("runner_state")?;
             if let Some(bytes) = bytes {
-                self.state = Mutex::new(RunState::try_from_slice(&bytes)?);
+                *self.state.lock().await = RunState::try_from_slice(&bytes)?;
             }
         }
         Ok(())
     }
 
-    fn sync_state(&self) -> Result<()> {
+    #[tracing::instrument(skip(self))]
+    async fn sync_state(&self) -> Result<()> {
         if let Some(db) = &self.db {
-            let bytes = self.state.lock().unwrap().try_to_vec()?;
+            let bytes = self.state.lock().await.try_to_vec()?;
             db.insert("runner_state", bytes)?;
         }
         Ok(())

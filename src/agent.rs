@@ -95,7 +95,7 @@ impl Agent {
 
                     let mut runner = ctx.runner.lock().await;
 
-                    match runner.current_state() {
+                    match runner.current_state().await {
                         RunState::Processing(task) | RunState::Error(task) => {
                             // println!("... {:#?}", task);
                             info!(
@@ -114,7 +114,7 @@ impl Agent {
                                     *ctx.last_task_id.lock().await = task.id;
 
                                     // reset state only if the command is confirmed
-                                    let _ = runner.reset_state();
+                                    runner.reset_state().await.ok();
                                 }
                                 Err(e) => {
                                     error!("Failed to confirm... Error: {}", e);
@@ -170,7 +170,7 @@ impl Agent {
                         }
                         Some(e) = update_receiver.recv() => {
                             let mut runner = ctx.runner.lock().await;
-                            match runner.current_state() {
+                            match runner.current_state().await {
                                 RunState::Error(task) | RunState::Processing(task) => {
                                     let cek = ctx.cek.lock().await;
                                     match convert_message_to_task(e.message, cek.as_ref()) {
@@ -178,10 +178,10 @@ impl Agent {
                                             if new_task.is_skipped() {
                                                 info!("Task #{} was skipped...", new_task.id);
                                                 if task.id == new_task.id {
-                                                    if runner.notify_skip(&task).await.is_err() {
+                                                    runner.reset_state().await;
+                                                    if runner.notify_event(&task, "skip").await.is_err() {
                                                         info!("Failed to send skip notify...");
                                                     }
-                                                    let _ = runner.reset_state();
                                                 }
                                             }
                                         }
@@ -195,10 +195,10 @@ impl Agent {
                         }
                         Some(e) = delete_receiver.recv() => {
                             let mut runner = ctx.runner.lock().await;
-                            match runner.current_state() {
+                            match runner.current_state().await {
                                 RunState::Error(task) | RunState::Processing(task) => {
                                     if task.id == e.id {
-                                        let _ = runner.reset_state();
+                                        runner.reset_state().await.ok();
                                     }
                                 },
                                 _ => {}
@@ -361,11 +361,11 @@ impl AgentContext {
         info!("Prepare tasks...");
 
         let mut tasks = vec![];
-        let mut need_reset = true;
+        let mut need_reset = false;
 
         let mut runner = self.runner.lock().await;
 
-        let curr_task_id = match runner.current_state() {
+        let curr_task_id = match runner.current_state().await {
             RunState::Processing(t) | RunState::Complete(t) | RunState::Error(t) => {
                 info!("Current task id: {}", t.id);
                 t.id
@@ -379,11 +379,10 @@ impl AgentContext {
             let msg_id = message.id;
             if msg_id > id_from {
                 if let Ok(task) = convert_message_to_task(message, cek.as_ref()) {
-                    // check that the current task is valid
-                    if task.id == curr_task_id {
-                        need_reset = task.is_skipped();
-                    }
                     if !task.is_skipped() {
+                        if task.id == curr_task_id {
+                            need_reset = true;
+                        }
                         tasks.push(task);
                     }
                 } else {
@@ -394,7 +393,7 @@ impl AgentContext {
 
         if need_reset {
             info!("Reset current run state");
-            if let Err(e) = runner.reset_state() {
+            if let Err(e) = runner.reset_state().await {
                 warn!("Failed to reset run state... {}", e);
             }
         }

@@ -3,6 +3,7 @@ use anyhow::Error;
 use anyhow::Result;
 use futures::StreamExt;
 use shiplift::{Container, ContainerOptions, Docker, PullOptions};
+use std::borrow::Cow;
 use tracing::info;
 
 const MONITOR_IMAGE: &str = "amir20/dozzle:latest";
@@ -60,8 +61,8 @@ impl<'a, 'b> TaskMonitor<'a, 'b> {
                 "DOZZLE_NO_ANALYTICS=true",
                 &format!(
                     "DOZZLE_BASE=/{}",
-                    if !self.opts.password.is_empty() {
-                        self.opts.password
+                    if !self.opts.secret.is_empty() {
+                        &self.opts.secret
                     } else {
                         ""
                     }
@@ -102,8 +103,8 @@ impl<'a, 'b> TaskMonitor<'a, 'b> {
 #[derive(Default)]
 pub struct TaskMonitorOptions<'a> {
     port: u16,
-    password: &'a str,
-    filter: &'a str,
+    secret: Cow<'a, str>,
+    filter: Cow<'a, str>,
 }
 
 impl<'a> TaskMonitorOptions<'a> {
@@ -119,13 +120,13 @@ impl<'a> TaskMonitorOptions<'a> {
         self
     }
 
-    pub fn password(mut self, password: &'a str) -> Self {
-        self.password = password;
+    pub fn secret(mut self, secret: &'a str) -> Self {
+        self.secret = Cow::from(secret);
         self
     }
 
     pub fn filter(mut self, filter: &'a str) -> Self {
-        self.filter = filter;
+        self.filter = Cow::from(filter);
         self
     }
 }
