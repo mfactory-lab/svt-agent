@@ -299,7 +299,7 @@ impl TaskRunner {
             // &format!("--inventory=./inventory/{}.yaml", self.opts.cluster),
             format!(
                 "--inventory={},",
-                env::var("DOCKER_HOST").unwrap_or("localhost".to_string())
+                env::var("DOCKER_HOST_IP").unwrap_or("localhost".to_string())
             ),
         ];
         for file in &[
