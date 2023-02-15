@@ -23,8 +23,8 @@ RUN cargo build --release
 # RUN cargo build --release --target x86_64-unknown-linux-musl
 
 FROM chef AS sv_manager
-ARG SV_MANAGER_VERSION=latest
-RUN curl -sLO https://github.com/mfactory-lab/sv-manager/archive/refs/tags/${SV_MANAGER_VERSION}.tar.gz \
+ARG SV_MANAGER_TAG=agent
+RUN curl -sLO https://github.com/mfactory-lab/sv-manager/archive/refs/tags/${SV_MANAGER_TAG}.tar.gz \
   && tar -xvf latest.tar.gz --strip-components=1 \
   && rm latest.tar.gz \
   && mv inventory_example inventory
