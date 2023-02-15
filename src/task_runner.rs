@@ -132,7 +132,7 @@ impl TaskRunner {
 
         // initialize db
         let home = self.opts.working_dir.to_str().unwrap();
-        self.db = Some(sled::open(format!("{}/db", home))?);
+        self.db = Some(sled::open(format!("{home}/db"))?);
 
         if let Err(e) = self.load_state().await {
             info!("Failed to load initial state. {}", e);
@@ -183,7 +183,9 @@ impl TaskRunner {
             match self.run_task(&task).await {
                 Ok(container) => {
                     let _ = notifier.notify_start().await;
-                    let _ = self.set_state(RunState::Processing(task.clone()));
+                    self.set_state(RunState::Processing(task.clone()))
+                        .await
+                        .ok();
 
                     let monitor_opts = TaskMonitorOptions::new()
                         .filter(self.opts.container_name.as_ref())
@@ -221,12 +223,12 @@ impl TaskRunner {
                     // retrieve task output only if status code is present
                     if let Some(status_code) = status_code {
                         if status_code == 0 {
-                            let _ = self.set_state(RunState::Complete(task.clone()));
+                            self.set_state(RunState::Complete(task.clone())).await.ok();
                             let output =
                                 get_container_logs(&container, ContainerLogFlags::StdOut).await;
                             let _ = notifier.notify_finish(status_code, output).await;
                         } else {
-                            let _ = self.set_state(RunState::Error(task.clone()));
+                            self.set_state(RunState::Error(task.clone())).await.ok();
                             let output = get_container_logs(
                                 &container,
                                 match status_code {
@@ -235,7 +237,7 @@ impl TaskRunner {
                                 },
                             )
                             .await;
-                            let _ = notifier.notify_error(output).await;
+                            notifier.notify_error(output).await.ok();
                         }
                     }
 
@@ -256,8 +258,8 @@ impl TaskRunner {
             }
 
             if let Some(e) = internal_error {
-                let _ = self.set_state(RunState::Error(task.clone()));
-                let _ = notifier.notify_error(e.to_string()).await;
+                self.set_state(RunState::Error(task.clone())).await.ok();
+                notifier.notify_error(e.to_string()).await.ok();
                 return Err(e);
             }
         }
