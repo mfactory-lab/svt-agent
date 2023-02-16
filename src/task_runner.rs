@@ -16,7 +16,7 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 use tokio::sync::{Mutex, MutexGuard};
 use tokio::time;
-use tracing::info;
+use tracing::{debug, info};
 use tracing::{error, warn};
 
 /// Prevent starting the monitoring when commands executes immediately
