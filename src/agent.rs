@@ -84,7 +84,7 @@ impl Agent {
                 loop {
                     match check_balance(&ctx.client).await {
                         Ok(balance) => {
-                            info!("Balance: {} lamports", balance);
+                            debug!("Balance: {} lamports", balance);
                         }
                         Err(e) => {
                             warn!("{e}");
@@ -110,9 +110,7 @@ impl Agent {
                             match ctx.client.read_message(task.id, &ctx.channel_id).await {
                                 Ok(sig) => {
                                     info!("Confirmed Task #{}! Signature: {}", task.id, sig);
-
                                     *ctx.last_task_id.lock().await = task.id;
-
                                     // reset state only if the command is confirmed
                                     runner.reset_state().await.ok();
                                 }
@@ -127,7 +125,7 @@ impl Agent {
                             Ok(s) => {
                                 // state is not changed after run, wait a new task...
                                 if s == RunState::Pending {
-                                    info!("Waiting a command...");
+                                    debug!("Waiting a command...");
                                     time::sleep(Duration::from_millis(WAIT_COMMAND_INTERVAL)).await;
                                 }
                             }
@@ -225,8 +223,14 @@ impl Agent {
             let url = ctx.client.cluster.ws_url().to_owned();
             let filter = RpcTransactionLogsFilter::Mentions(vec![ctx.channel_id.to_string()]);
 
+            let mut interval = tokio::time::interval(Duration::from_secs(5));
+            interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+
             async move {
                 loop {
+                    // On disconnect, retry every 5s.
+                    interval.tick().await;
+
                     info!("Connecting to `{}`...", url);
 
                     match PubsubClient::new(url.as_str()).await {
@@ -239,9 +243,11 @@ impl Agent {
                             let listener =
                                 Listener::new(&ctx.client.program_id, &pub_sub_client, &filter);
 
+                            let logs_subscribe = listener.logs_subscribe().await;
+
                             info!("Listen new events...");
-                            match listener.log_stream().await {
-                                Ok((mut stream, _)) => {
+                            match logs_subscribe {
+                                Ok((mut stream, _unsubscribe)) => {
                                     while let Some(log) = stream.next().await {
                                         listener
                                             .on::<NewMessageEvent>(&log, &|evt| {
@@ -272,24 +278,24 @@ impl Agent {
                                                 }
                                             });
                                     }
+                                    // _unsubscribe().await;
                                 }
                                 Err(e) => {
                                     error!("Error: {:?}", e);
                                 }
                             }
 
-                            match &pub_sub_client.shutdown().await {
-                                Ok(_) => {}
-                                Err(e) => {
-                                    info!("Failed to shutdown client ({})", e);
-                                }
-                            }
-                            info!("Reconnecting...");
-                            time::sleep(Duration::from_millis(3000)).await;
+                            // match &pub_sub_client.shutdown().await {
+                            //     Ok(_) => {}
+                            //     Err(e) => {
+                            //         info!("Failed to shutdown client ({})", e);
+                            //     }
+                            // }
+
+                            // info!("Reconnecting...");
                         }
                         Err(e) => {
                             warn!("{}", e);
-                            time::sleep(Duration::from_millis(3000)).await;
                         }
                     };
                 }
