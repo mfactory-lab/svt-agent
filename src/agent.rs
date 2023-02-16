@@ -358,7 +358,7 @@ impl AgentContext {
         let cek = self.cek.lock().await;
         let id_from = *self.last_task_id.lock().await;
 
-        info!("Prepare tasks...");
+        info!("Prepare tasks... (id_from: {})", id_from);
 
         let mut tasks = vec![];
         let mut need_reset = false;
@@ -378,15 +378,19 @@ impl AgentContext {
         for message in channel.messages {
             let msg_id = message.id;
             if msg_id > id_from {
-                if let Ok(task) = convert_message_to_task(message, cek.as_ref()) {
-                    if !task.is_skipped() {
-                        if task.id == curr_task_id {
-                            need_reset = true;
+                match convert_message_to_task(message, cek.as_ref()) {
+                    Ok(task) => {
+                        if task.is_skipped() {
+                            if task.id == curr_task_id {
+                                need_reset = true;
+                            }
+                        } else {
+                            tasks.push(task);
                         }
-                        tasks.push(task);
                     }
-                } else {
-                    warn!("Failed to convert message to task... Message#{}", msg_id);
+                    Err(_) => {
+                        warn!("Failed to convert message to task... Message#{}", msg_id);
+                    }
                 }
             }
         }
