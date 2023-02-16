@@ -12,7 +12,7 @@ use anyhow::Result;
 use futures::future::BoxFuture;
 use futures::stream::BoxStream;
 use regex::Regex;
-use tracing::info;
+use tracing::{debug, info, warn};
 
 /// Listen to events in the blockchain through program logs
 /// The event is the serialized data in the "Program data:" section.
@@ -34,14 +34,14 @@ impl<'a> Listener<'a> {
         Self {
             program_id: *program_id,
             config: RpcTransactionLogsConfig {
-                commitment: Some(CommitmentConfig::processed()),
+                commitment: Some(CommitmentConfig::confirmed()),
             },
             filter,
             client,
         }
     }
 
-    pub async fn log_stream(
+    pub async fn logs_subscribe(
         &self,
     ) -> PubsubClientResult<(
         BoxStream<'_, Response<RpcLogsResponse>>,
@@ -52,46 +52,25 @@ impl<'a> Listener<'a> {
             .await
     }
 
-    // TODO: find a better way to handle many events in single method
-    // pub async fn on<T: Event>(&self, cb: impl Fn(T)) -> Result<()> {
-    //     let (mut stream, _unsubscribe) = self
-    //         .client
-    //         .logs_subscribe(self.filter.clone(), self.config.clone())
-    //         .await?;
-    //
-    //     while let Some(log) = stream.next().await {
-    //         match self.handle_event::<T>(&log, &cb) {
-    //             Ok(_) => {}
-    //             Err(e) => {
-    //                 error!("Error: {}", e);
-    //             }
-    //         }
-    //     }
-    //
-    //     info!("Unsubscribing...");
-    //     // FnOnce::call_once(unsubscribe, ());
-    //
-    //     Ok(())
-    // }
-
-    pub fn on<T>(&self, log: &Response<RpcLogsResponse>, cb: &impl Fn(T)) -> &Self
-    where
-        T: Event,
-    {
+    pub fn on<T: Event + AnchorDeserialize>(
+        &self,
+        log: &Response<RpcLogsResponse>,
+        f: &impl Fn(T),
+    ) -> &Self {
         let mut logs = &log.value.logs[..];
         let self_program_str = self.program_id.to_string();
 
         if !logs.is_empty() {
-            // info!("Try to parse logs...");
+            debug!("Try to parse logs...");
             if let Ok(mut execution) = Execution::new(&mut logs) {
-                // info!("{} logs found...", logs.len());
+                debug!("{} logs found...", logs.len());
                 for l in logs {
                     // Parse the log.
                     let (event, new_program, did_pop) = {
                         if self_program_str == execution.program() {
                             handle_program_log::<T>(self_program_str.as_str(), l).unwrap_or_else(
                                 |e| {
-                                    info!("Unable to parse log: {}", e);
+                                    warn!("Unable to parse log: {}", e);
                                     (None, None, false)
                                 },
                             )
@@ -103,7 +82,7 @@ impl<'a> Listener<'a> {
                     };
                     // Emit the event.
                     if let Some(e) = event {
-                        cb(e);
+                        f(e);
                     }
                     // Switch program context on CPI.
                     if let Some(new_program) = new_program {
@@ -121,26 +100,15 @@ impl<'a> Listener<'a> {
     }
 }
 
-const PROGRAM_LOG: &str = "Program log: ";
-const PROGRAM_DATA: &str = "Program data: ";
-
-fn handle_program_log<T: Event>(
-    program_id: &str,
+fn handle_program_log<T: Event + AnchorDeserialize>(
+    self_program_str: &str,
     l: &str,
 ) -> Result<(Option<T>, Option<String>, bool), ClientError> {
     // Log emitted from the current program.
-    if let Some(log) = l
-        .strip_prefix(PROGRAM_LOG)
-        .or_else(|| l.strip_prefix(PROGRAM_DATA))
-    {
-        let borsh_bytes = match anchor_lang::__private::base64::decode(log) {
-            Ok(borsh_bytes) => borsh_bytes,
-            _ => {
-                #[cfg(feature = "debug")]
-                println!("Could not base64 decode log: {}", log);
-                return Ok((None, None, false));
-            }
-        };
+    if l.starts_with("Program log:") {
+        let log = l.to_string().split_off("Program log: ".len());
+        let borsh_bytes = anchor_lang::__private::base64::decode(log)
+            .map_err(|_| ClientError::LogParseError(l.to_string()))?;
 
         let mut slice: &[u8] = &borsh_bytes[..];
         let disc: [u8; 8] = {
@@ -151,7 +119,7 @@ fn handle_program_log<T: Event>(
         };
         let mut event = None;
         if disc == T::discriminator() {
-            let e: T = AnchorDeserialize::deserialize(&mut slice)
+            let e: T = anchor_lang::AnchorDeserialize::deserialize(&mut slice)
                 .map_err(|e| ClientError::LogParseError(e.to_string()))?;
             event = Some(e);
         }
@@ -159,14 +127,14 @@ fn handle_program_log<T: Event>(
     }
     // System log.
     else {
-        let (program, did_pop) = handle_system_log(program_id, l);
+        let (program, did_pop) = handle_system_log(self_program_str, l);
         Ok((None, program, did_pop))
     }
 }
 
-fn handle_system_log(program_id: &str, log: &str) -> (Option<String>, bool) {
-    if log.starts_with(&format!("Program {} log:", program_id)) {
-        (Some(program_id.to_string()), false)
+fn handle_system_log(this_program_str: &str, log: &str) -> (Option<String>, bool) {
+    if log.starts_with(&format!("Program {} log:", this_program_str)) {
+        (Some(this_program_str.to_string()), false)
     } else if log.contains("invoke") {
         (Some("cpi".to_string()), false) // Any string will do.
     } else {
