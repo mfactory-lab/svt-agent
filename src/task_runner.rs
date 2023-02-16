@@ -114,7 +114,7 @@ impl TaskRunner {
     /// Ping the docker healthy
     async fn ping(&self) -> Result<()> {
         let res = self.docker.ping().await?;
-        info!("Docker ping: {}", res);
+        debug!("Docker ping: {}", res);
         Ok(())
     }
 
