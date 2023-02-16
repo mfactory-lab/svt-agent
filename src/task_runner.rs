@@ -297,7 +297,7 @@ impl TaskRunner {
             "ansible-playbook".to_string(),
             // "--limit=localhost",
             // &format!("--inventory=./inventory/{}.yaml", self.opts.cluster),
-            "--tags agent".to_string(),
+            "--tags=agent".to_string(),
             format!(
                 "--inventory={},",
                 env::var("DOCKER_HOST_IP").unwrap_or("localhost".to_string())
