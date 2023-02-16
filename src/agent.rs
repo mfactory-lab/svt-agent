@@ -231,6 +231,8 @@ impl Agent {
 
                     match PubsubClient::new(url.as_str()).await {
                         Ok(pub_sub_client) => {
+                            info!("Connected!");
+
                             info!("Loading tasks...");
                             ctx.load_tasks().await;
 
