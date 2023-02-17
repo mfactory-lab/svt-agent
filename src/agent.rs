@@ -250,6 +250,12 @@ impl Agent {
                             match logs_subscribe {
                                 Ok((mut stream, _unsubscribe)) => {
                                     while let Some(log) = stream.next().await {
+                                        // skip simulation
+                                        if log.value.signature == "1111111111111111111111111111111111111111111111111111111111111111" {
+                                            info!("Probably simulation, skip...");
+                                            continue;
+                                        }
+
                                         listener
                                             .on::<NewMessageEvent>(&log, &|evt| {
                                                 info!("{:?}", evt);
