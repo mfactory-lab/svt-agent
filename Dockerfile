@@ -24,7 +24,7 @@ RUN cargo build --release
 
 FROM chef AS sv_manager
 ARG SV_MANAGER_TAG=agent
-RUN curl -sLO https://github.com/mfactory-lab/sv-manager/archive/refs/tags/${SV_MANAGER_TAG}.tar.gz \
+RUN curl -sLO https://github.com/mfactory-lab/sv-manager/archive/refs/tags/${SV_MANAGER_TAG}.tar.gz?_=1 \
   && tar -xvf ${SV_MANAGER_TAG}.tar.gz --strip-components=1 \
   && rm ${SV_MANAGER_TAG}.tar.gz \
   && mv inventory_example inventory
