@@ -354,7 +354,7 @@ impl TaskRunner {
     }
 
     pub fn can_add_task(&mut self, task_id: u64) -> bool {
-        task_id <= self.last_added_task_id
+        task_id > self.last_added_task_id
     }
 
     /// Add new [task] to the [queue]
