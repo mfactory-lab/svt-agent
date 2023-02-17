@@ -24,10 +24,10 @@ RUN cargo build --release
 
 FROM chef AS sv_manager
 ARG SV_MANAGER_TAG=agent
-RUN curl -sLO https://github.com/mfactory-lab/sv-manager/archive/refs/tags/${SV_MANAGER_TAG}.tar.gz?_=1 \
-  && tar -xvf ${SV_MANAGER_TAG}.tar.gz --strip-components=1 \
-  && rm ${SV_MANAGER_TAG}.tar.gz \
-  && mv inventory_example inventory
+RUN curl -fsSL https://github.com/mfactory-lab/sv-manager/archive/refs/tags/${SV_MANAGER_TAG}.tar.gz -o archive.tar.gz \
+  && tar -xvf archive.tar.gz --strip-components=1 \
+  && rm archive.tar.gz \
+  && ls -la .
 
 # FROM gcr.io/distroless/cc
 # FROM gcr.io/distroless/cc-debian1
