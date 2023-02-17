@@ -90,6 +90,8 @@ impl TaskRunnerOpts {
 pub struct TaskRunner {
     /// The [Task] queue
     queue: VecDeque<Task>,
+    /// The last added [Task] identifier
+    last_added_task_id: u64,
     /// Current run state
     state: Mutex<RunState>,
     /// [Docker] instance (task running)
@@ -104,6 +106,7 @@ impl TaskRunner {
     pub fn new(opts: TaskRunnerOpts) -> Self {
         Self {
             queue: VecDeque::new(),
+            last_added_task_id: Default::default(),
             state: Default::default(),
             docker: Docker::new(),
             db: None,
@@ -351,11 +354,20 @@ impl TaskRunner {
         self.queue.clear()
     }
 
+    pub fn can_add_task(&mut self, task_id: u64) -> bool {
+        task_id <= self.last_added_task_id
+    }
+
     /// Add new [task] to the [queue]
     pub fn add_task(&mut self, task: Task) {
-        // prevent task duplication
-        self.delete_task(task.id);
-        self.queue.push_back(task);
+        if self.can_add_task(task.id) {
+            self.last_added_task_id = task.id;
+            // prevent task duplication
+            self.delete_task(task.id);
+            self.queue.push_back(task);
+        } else {
+            warn!("Task #{} has already been added earlier", task.id);
+        }
     }
 
     /// Delete [task] from the queue

@@ -154,11 +154,12 @@ impl Agent {
                     tokio::select! {
                         Some(e) = new_receiver.recv() => {
                             let cek = ctx.cek.lock().await;
+                            let mut runner = ctx.runner.lock().await;
                             match convert_message_to_task(e.message, cek.as_ref()) {
-                                Ok(task) => {
-                                    if !task.is_skipped() {
-                                        info!("Task #{} was added...", task.id);
-                                        ctx.runner.lock().await.add_task(task);
+                                Ok(new_task) => {
+                                    if !new_task.is_skipped() {
+                                        info!("Task #{} was added...", new_task.id);
+                                        runner.add_task(new_task);
                                     }
                                 }
                                 Err(_) => {
