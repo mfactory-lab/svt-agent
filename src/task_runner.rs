@@ -170,7 +170,6 @@ impl TaskRunner {
 
     /// Try to run the front task from the [queue] and start the monitor instance if needed.
     /// Return [Task] if container status code present
-    #[tracing::instrument(skip_all)]
     pub async fn run(&mut self) -> Result<RunState> {
         self.ping().await?;
 
