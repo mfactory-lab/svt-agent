@@ -81,6 +81,7 @@ impl Agent {
             let ctx = self.ctx.clone();
 
             async move {
+                let mut prev_state = RunState::Pending;
                 loop {
                     match check_balance(&ctx.client).await {
                         Ok(balance) => {
@@ -125,7 +126,9 @@ impl Agent {
                             Ok(s) => {
                                 // state is not changed after run, wait a new task...
                                 if s == RunState::Pending {
-                                    debug!("Waiting a command...");
+                                    if prev_state != RunState::Pending {
+                                        info!("Waiting a command...");
+                                    }
                                     time::sleep(Duration::from_millis(WAIT_COMMAND_INTERVAL)).await;
                                 }
                             }
@@ -134,6 +137,8 @@ impl Agent {
                             }
                         },
                     }
+
+                    prev_state = runner.current_state().await;
                 }
             }
         })
@@ -160,10 +165,12 @@ impl Agent {
                                     if !new_task.is_skipped() {
                                         info!("Task #{} was added...", new_task.id);
                                         runner.add_task(new_task);
+                                    } else {
+                                        warn!("Cannot add a task #{}, probably skipped...", new_task.id);
                                     }
                                 }
                                 Err(_) => {
-                                    info!("Failed to convert message to task");
+                                    warn!("Failed to convert message to task");
                                 }
                             }
                         }
@@ -185,7 +192,7 @@ impl Agent {
                                             }
                                         }
                                         Err(_) => {
-                                            info!("Failed to convert message to task");
+                                            warn!("Failed to convert message to task");
                                         }
                                     }
                                 },
@@ -302,7 +309,7 @@ impl Agent {
                             // info!("Reconnecting...");
                         }
                         Err(e) => {
-                            warn!("{}", e);
+                            error!("{}", e);
                         }
                     };
                 }
