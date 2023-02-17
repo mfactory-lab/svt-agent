@@ -100,6 +100,7 @@ fn parse_logs<T: Event>(program_id: String, logs: Vec<String>, f: &impl Fn(T)) {
 const PROGRAM_LOG: &str = "Program log: ";
 const PROGRAM_DATA: &str = "Program data: ";
 
+#[inline]
 fn handle_program_log<T: anchor_lang::Event + anchor_lang::AnchorDeserialize>(
     self_program_str: &str,
     l: &str,
@@ -139,6 +140,7 @@ fn handle_program_log<T: anchor_lang::Event + anchor_lang::AnchorDeserialize>(
     }
 }
 
+#[inline]
 fn handle_system_log(this_program_str: &str, log: &str) -> (Option<String>, bool) {
     if log.starts_with(&format!("Program {this_program_str} log:")) {
         (Some(this_program_str.to_string()), false)
