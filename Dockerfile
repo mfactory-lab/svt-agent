@@ -127,7 +127,7 @@ RUN wget -O archive.tar.gz https://github.com/mfactory-lab/sv-manager/archive/re
 # ENTRYPOINT [ "/svt-agent" ]
 
 # recommended
-FROM run as production
+FROM base as production
 
 ARG APP_NAME
 ARG RUST_LOG
@@ -135,7 +135,8 @@ ENV RUST_LOG=${RUST_LOG}
 ARG RUST_BACKTRACE
 ENV RUST_BACKTRACE=${RUST_BACKTRACE}
 
-COPY --from=build --chown=appuser:appuser /app/bin/${APP_NAME} /
+COPY --from=build /app/bin/${APP_NAME} /
+# COPY --from=build --chown=appuser:appuser /app/bin/${APP_NAME} /
 COPY --from=assets /app ./ansible
 COPY ./ansible/ ./ansible
 
