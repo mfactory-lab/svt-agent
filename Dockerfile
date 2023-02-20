@@ -130,8 +130,6 @@ RUN wget -O archive.tar.gz https://github.com/mfactory-lab/sv-manager/archive/re
 # recommended
 FROM base as production
 
-LABEL website="geeksforgeeks"
-
 ARG APP_NAME
 ARG RUST_LOG
 ENV RUST_LOG=${RUST_LOG}
