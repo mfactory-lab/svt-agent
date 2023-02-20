@@ -54,8 +54,8 @@ do_install() {
 
   say "Cleaning up..."
   docker stop $CONTAINER_NAME 2>/dev/null 1>/dev/null
-  docker container rm $CONTAINER_NAME 2>/dev/null 1>/dev/null
-  docker volume rm "$CONTAINER_NAME-ansible" 2>/dev/null 1>/dev/null
+  docker container rm -f -v $CONTAINER_NAME 2>/dev/null 1>/dev/null
+  docker volume rm -f "$CONTAINER_NAME-ansible" 2>/dev/null 1>/dev/null
 
   say "Try to generate agent keypair..."
   if [[ -f $KEYPAIR_PATH ]]; then
