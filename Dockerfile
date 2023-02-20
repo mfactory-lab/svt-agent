@@ -92,17 +92,17 @@ WORKDIR /app
 # This is why we do not want to use 'FROM scratch',
 # otherwise the user within the container would be still root
 
-FROM base as run
-RUN addgroup -g 1001 appuser \
- && adduser  -u 1001 -G appuser -H -D appuser
-USER 1001
+# FROM base as run
+# RUN addgroup -g 1001 appuser \
+#  && adduser  -u 1001 -G appuser -H -D appuser
+# USER 1001
 
 #######################
 # Assets
 #######################
 
 FROM base AS assets
-ARG SV_MANAGER_TAG=agent-v0.0.1
+ARG SV_MANAGER_TAG=agent-v0.0.4
 RUN wget -O archive.tar.gz https://github.com/mfactory-lab/sv-manager/archive/refs/tags/${SV_MANAGER_TAG}.tar.gz \
   && tar -xvf archive.tar.gz --strip-components=1 \
   && mv inventory_example inventory \
