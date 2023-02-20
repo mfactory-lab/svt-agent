@@ -102,7 +102,7 @@ USER 1001
 #######################
 
 FROM base AS assets
-ARG SV_MANAGER_TAG=agent
+ARG SV_MANAGER_TAG=agent-v0.0.1
 RUN wget -O archive.tar.gz https://github.com/mfactory-lab/sv-manager/archive/refs/tags/${SV_MANAGER_TAG}.tar.gz \
   && tar -xvf archive.tar.gz --strip-components=1 \
   && rm archive.tar.gz
