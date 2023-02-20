@@ -92,10 +92,10 @@ WORKDIR /app
 # This is why we do not want to use 'FROM scratch',
 # otherwise the user within the container would be still root
 
-# FROM base as run
-# RUN addgroup -g 1001 appuser \
-#  && adduser  -u 1001 -G appuser -H -D appuser
-# USER 1001
+FROM base as run
+RUN addgroup -g 1001 appuser \
+ && adduser  -u 1001 -G appuser -H -D appuser
+USER 1001
 
 #######################
 # Assets
@@ -111,8 +111,23 @@ RUN wget -O archive.tar.gz https://github.com/mfactory-lab/sv-manager/archive/re
 # Final image
 #######################
 
-# not really recommended
-FROM scratch as production_binary
+# # not really recommended
+# FROM scratch as production_binary
+#
+# ARG APP_NAME
+# ARG RUST_LOG
+# ENV RUST_LOG=${RUST_LOG}
+# ARG RUST_BACKTRACE
+# ENV RUST_BACKTRACE=${RUST_BACKTRACE}
+#
+# COPY --from=build /app/bin/${APP_NAME} /
+# COPY --from=assets /app ./ansible
+# COPY ./ansible/ ./ansible
+#
+# ENTRYPOINT [ "/svt-agent" ]
+
+# recommended
+FROM run as production
 
 ARG APP_NAME
 ARG RUST_LOG
@@ -120,19 +135,8 @@ ENV RUST_LOG=${RUST_LOG}
 ARG RUST_BACKTRACE
 ENV RUST_BACKTRACE=${RUST_BACKTRACE}
 
-COPY --from=build /app/bin/${APP_NAME} /
+COPY --from=build --chown=appuser:appuser /app/bin/${APP_NAME} /
 COPY --from=assets /app ./ansible
 COPY ./ansible/ ./ansible
 
 ENTRYPOINT [ "/svt-agent" ]
-
-# # recommended
-# FROM run as production
-#
-# ARG APP_NAME
-# ARG RUST_BACKTRACE
-# ENV RUST_BACKTRACE=${RUST_BACKTRACE}
-#
-# COPY --from=build --chown=appuser:appuser /app/bin/${APP_NAME} /
-#
-# ENTRYPOINT [ "/svt-agent" ]
