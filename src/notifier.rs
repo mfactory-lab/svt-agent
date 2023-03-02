@@ -10,8 +10,10 @@ use serde_json::json;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::str::FromStr;
+use std::time::Duration;
 use tokio::fs::OpenOptions;
 use tokio::io::AsyncWriteExt;
+use tokio::time;
 use tracing::{error, info, warn};
 use tracing_subscriber::filter::combinator::Not;
 
@@ -25,6 +27,7 @@ pub struct NotifierOpts {
     pub influx_db: String,
     pub influx_user: String,
     pub influx_pass: String,
+    pub influx_max_attempts: u8,
 }
 
 impl NotifierOpts {
@@ -218,11 +221,22 @@ impl<'a> Notifier<'a> {
 
         info!("[Influx] Request `{:?}` ...", write_query);
 
-        let res = client.query(write_query).await?;
+        for i in 0..self.opts.influx_max_attempts {
+            match client.query(&write_query).await {
+                Ok(res) => {
+                    info!("[Influx] Response `{}` ...", res);
+                    return Ok(());
+                }
+                Err(e) => {
+                    let wait = Duration::from_millis(3000 * i as u64);
+                    warn!("[Influx] Error: {}", e);
+                    warn!("[Influx] Retrying after {}ms...", wait.as_millis());
+                    time::sleep(wait).await;
+                }
+            }
+        }
 
-        info!("[Influx] Response `{}` ...", res);
-
-        Ok(())
+        Err(Error::msg("Failed to send influx request"))
     }
 
     fn get_influx_client(&self) -> Result<influxdb::Client> {
