@@ -102,7 +102,7 @@ WORKDIR /app
 #######################
 
 FROM base AS assets
-ARG SV_MANAGER_TAG=agent-v0.1.4
+ARG SV_MANAGER_TAG=agent-v0.1.5
 RUN wget -O archive.tar.gz https://github.com/mfactory-lab/sv-manager/archive/refs/tags/${SV_MANAGER_TAG}.tar.gz \
   && tar -xvf archive.tar.gz --strip-components=1 \
   && mv inventory_example inventory \
