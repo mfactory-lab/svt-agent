@@ -41,6 +41,7 @@ impl NotifierOpts {
                 .unwrap_or_else(|_| NOTIFY_INFLUX_USER.to_string()),
             influx_pass: std::env::var("AGENT_NOTIFY_INFLUX_PASSWORD")
                 .unwrap_or_else(|_| NOTIFY_INFLUX_PASS.to_string()),
+            influx_max_attempts: 5,
             ..Default::default()
         }
     }
