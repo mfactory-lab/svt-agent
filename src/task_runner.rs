@@ -314,6 +314,7 @@ impl TaskRunner {
                 cmd.push(format!("--extra-vars=@{file}"));
             }
         }
+        // cmd.push("--extra-vars=@/etc/sv_manager/sv_manager.conf".to_string());
         cmd.push(format!("--extra-vars={}", json!(task.args)));
         cmd.push(format!("./playbooks/{}.yaml", task.name));
 
