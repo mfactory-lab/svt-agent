@@ -18,10 +18,10 @@ WORKING_DIR="$HOME/svt-agent"
 KEYPAIR_PATH="$WORKING_DIR/keypair.json"
 
 # ARE YOU ROOT (or sudo)?
-#if [[ $EUID -ne 0 ]]; then
-#	echo -e "ERROR: This script must be run as root"
-#	exit 1
-#fi
+if [[ $EUID -ne 0 ]]; then
+	echo -e "ERROR: This script must be run as root"
+	exit 1
+fi
 
 do_install() {
   echo "Installing SVT Agent..."
@@ -110,7 +110,7 @@ generate_sshkey() {
     mkdir -p $SSHKEY_PATH
     ssh-keygen -t rsa -b 4096 -f "$SSHKEY_PATH/$@" -q -N '' -C 'svt-agent'
     chmod 600 "$SSHKEY_PATH/$@"
-    cat "$SSHKEY_PATH/$@.pub" >>~/.ssh/authorized_keys
+    cat "$SSHKEY_PATH/$@.pub" >> ~/.ssh/authorized_keys
     say "SSH Keyfile was generated"
   fi
 }
