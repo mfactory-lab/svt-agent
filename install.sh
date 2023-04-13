@@ -110,6 +110,11 @@ generate_sshkey() {
     mkdir -p $SSHKEY_PATH
     ssh-keygen -t rsa -b 4096 -f "$SSHKEY_PATH/$@" -q -N '' -C 'svt-agent'
     chmod 600 "$SSHKEY_PATH/$@"
+    # check trailing newline
+    x=$(tail -c 1 ~/.ssh/authorized_keys)
+    if [ "$x" != "" ]
+      then echo >> ~/.ssh/authorized_keys
+    fi
     cat "$SSHKEY_PATH/$@.pub" >> ~/.ssh/authorized_keys
     say "SSH Keyfile was generated"
   fi
