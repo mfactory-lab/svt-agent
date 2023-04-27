@@ -1,5 +1,5 @@
 /// Messenger program
-pub const MESSENGER_PROGRAM_ID: &str = "4AnSBTc21f4wTBHmnFyarbosr28Qk4CgGFBHcRh4kYPw";
+pub const MESSENGER_PROGRAM_ID: &str = "CgRaMXqqRHNT3Zo2uVZfX72TuxUgcLb8E3A8KrXnbXAC";
 
 pub const DEFAULT_CLUSTER: &str = "devnet";
 

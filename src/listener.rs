@@ -213,11 +213,11 @@ mod tests {
         let program_id = MESSENGER_PROGRAM_ID;
 
         let logs = vec![
-            "Program 4AnSBTc21f4wTBHmnFyarbosr28Qk4CgGFBHcRh4kYPw invoke [1]".to_string(),
+            "Program CgRaMXqqRHNT3Zo2uVZfX72TuxUgcLb8E3A8KrXnbXAC invoke [1]".to_string(),
             "Program log: Instruction: PostMessage".to_string(),
             "Program data: f+oFlw98HI/XJ7lRjgJLxQEwYGUh2xIw9QZIsLuauTpvLXnjZfTp0QQAAAAAAAAAIA85nxmXZazQMMhPkyUosaAQ2L5bWdpx10IvN+LP+WYlOO9jAAAAAAGQAAAAUHZUZm11UzNBSkRtTzJCTVZpTW1rdCtEVlYvRDJQTkwzRG5zcUl6Q1FaVlBQdnNOUU1CaGdtTmVwR1hJWjBPeVhSMkZTVlcyRkxKWlV4eHIycjNDVnFPaVFRYUV6bkNpMm9sdkluUFBuNHVQdXE3R0pVN0xBRVREMFFKMXpDVFFibzVudXU0TE9hcHZ5MzRt".to_string(),
-            "Program 4AnSBTc21f4wTBHmnFyarbosr28Qk4CgGFBHcRh4kYPw consumed 19775 of 200000 compute units".to_string(),
-            "Program 4AnSBTc21f4wTBHmnFyarbosr28Qk4CgGFBHcRh4kYPw success".to_string(),
+            "Program CgRaMXqqRHNT3Zo2uVZfX72TuxUgcLb8E3A8KrXnbXAC consumed 19775 of 200000 compute units".to_string(),
+            "Program CgRaMXqqRHNT3Zo2uVZfX72TuxUgcLb8E3A8KrXnbXAC success".to_string(),
         ];
 
         parse_logs::<NewMessageEvent>(program_id.to_string(), logs.clone(), &|e| {
