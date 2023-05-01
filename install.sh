@@ -26,7 +26,7 @@ fi
 do_install() {
   echo "Installing SVT Agent..."
 
-  ensure is_valid_cluster $CLUSTER
+  # ensure is_valid_cluster $CLUSTER
   # TODO: validate channel_id
   # ensure is_valid_channel $CID
   ensure generate_sshkey "id_rsa"
