@@ -14,7 +14,7 @@ pub const WAIT_AUTHORIZATION_INTERVAL: u64 = 10000;
 pub const MIN_BALANCE_REQUIRED: u64 = 5000; // one tx cost
 
 /// @link: https://hub.docker.com/r/willhallonline/ansible
-pub const ANSIBLE_IMAGE: &str = "willhallonline/ansible:alpine";
+pub const ANSIBLE_IMAGE: &str = "willhallonline/ansible:2.13.7-alpine-3.15";
 
 pub const CONTAINER_NAME: &str = "svt-agent";
 
