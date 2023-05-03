@@ -1,24 +1,26 @@
 # SVT Agent (Solana Validator Toolkit Agent)
 
-**SVT Agent** is an app for secure communication between user and server
-through the solana blockchain.
+**SVT Agent** is an application designed for secure communication between the user and the server via the Solana blockchain. 
 
-The user just runs the predefined commands by signing them with his wallet. 
-The commands are stored in the blockchain in encrypted form. 
-The agent instantly receives new commands and starts executing them. 
-If a command fails, the user can decide what to do with it manually. 
-The execution log of each command is available via a secure link, 
-all logs are stored on the server.
+The user can execute predefined commands by signing them with their wallet, 
+and the commands are stored on the blockchain in encrypted form. 
+Once the user executes a command, the agent immediately receives it and begins execution. 
+If a command fails, the user has the option to handle it manually. 
+Additionally, a secure link provides access to the execution log of each command, 
+with all logs being stored on the server.
 
 ## Getting Started
-You should know your channel id (`CID`) before installing the agent.
-By default cluster is `devent`, but you can change it with `CLUSTER=devnet` var.
 
-Example command:
+Before installing the agent, you should know your channel ID (`CID`). 
+
+By default, the cluster is set to `devnet`, but you can change it using the `CLUSTER=devnet` variable.
+
+Here's an example command:
+
 ```shell
 CLUSTER=devnet CID=9ZTubJxjAPfPUAoC8Y9PeHNHbn3hkcq7DkiQpZT2cucV \
 bash -c "$(curl -sSfL https://mfactory-lab.github.io/svt-agent/install.sh)"
-````
+```
 
 # Configuration
 
