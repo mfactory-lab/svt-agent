@@ -305,16 +305,21 @@ impl TaskRunner {
                 env::var("DOCKER_HOST_IP").unwrap_or("localhost".to_string())
             ),
         ];
+
         for file in &[
-            "all.yml".to_string(),
-            format!("{}_validators.yaml", self.opts.cluster),
+            format!("{working_dir}/inventory/group_vars/all.yml").as_str(),
+            format!(
+                "{working_dir}/inventory/group_vars/{}_validators.yaml",
+                self.opts.cluster
+            )
+            .as_str(),
+            "/etc/sv_manager/sv_manager.conf",
         ] {
-            let file = format!("{working_dir}/inventory/group_vars/{file}");
             if Path::new(&file).exists() {
                 cmd.push(format!("--extra-vars=@{file}"));
             }
         }
-        // cmd.push("--extra-vars=@/etc/sv_manager/sv_manager.conf".to_string());
+
         cmd.push(format!("--extra-vars={}", json!(task.args)));
         cmd.push(format!("./playbooks/{}.yaml", task.name));
 
