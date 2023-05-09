@@ -315,7 +315,7 @@ impl TaskRunner {
             .as_str(),
             "/etc/sv_manager/sv_manager.conf",
         ] {
-            if Path::new(&file).exists() {
+            if Path::new(file).exists() {
                 cmd.push(format!("--extra-vars=@{file}"));
             }
         }
