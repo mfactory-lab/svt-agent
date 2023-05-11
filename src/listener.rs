@@ -180,7 +180,10 @@ impl Execution {
     }
 
     pub fn program(&self) -> String {
-        assert!(!self.stack.is_empty());
+        // assert!(!self.stack.is_empty());
+        if self.stack.is_empty() {
+            return Default::default();
+        }
         self.stack[self.stack.len() - 1].clone()
     }
 
@@ -189,8 +192,9 @@ impl Execution {
     }
 
     pub fn pop(&mut self) {
-        assert!(!self.stack.is_empty());
-        self.stack.pop().unwrap();
+        if !self.stack.is_empty() {
+            self.stack.pop().unwrap();
+        }
     }
 }
 
