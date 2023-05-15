@@ -4448,7 +4448,7 @@ checksum = "6bdef32e8150c2a081110b42772ffe7d7c9032b606bc226c8260fd97e0976601"
 
 [[package]]
 name = "svt-agent"
-version = "0.1.50"
+version = "0.1.51"
 dependencies = [
  "anchor-client",
  "anchor-lang",
