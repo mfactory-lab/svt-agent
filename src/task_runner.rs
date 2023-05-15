@@ -1,10 +1,11 @@
-use crate::constants::{ANSIBLE_IMAGE, CONTAINER_NAME};
+use crate::constants::{ANSIBLE_IMAGE, CONTAINER_NAME, TASK_CONFIG_FILES, TASK_WORKING_DIR};
 use crate::monitor::{TaskMonitor, TaskMonitorOptions};
 use crate::notifier::{Notifier, NotifierOpts};
 use crate::AgentArgs;
 use anchor_client::Cluster;
 use anchor_lang::prelude::*;
 use anyhow::{Error, Result};
+use clap::builder::Str;
 use futures::StreamExt;
 use serde_json::json;
 use shiplift::tty::TtyChunk;
@@ -134,18 +135,28 @@ impl TaskRunner {
         }
 
         // initialize db
-        let home = self.opts.working_dir.to_str().unwrap();
-        self.db = Some(sled::open(format!("{home}/db"))?);
+        self.db = {
+            let home = self.opts.working_dir.to_str().unwrap();
+            Some(sled::open(format!("{home}/db"))?)
+        };
 
-        if let Err(e) = self.load_state().await {
-            info!("Failed to load initial state. {}", e);
-        }
+        self.load_state().await?;
 
-        // pull ansible image first
+        // pull ansible image if needed
+        self.pull_image(ANSIBLE_IMAGE).await?;
+
+        // setup monitoring
+        TaskMonitor::init(&self.docker).await?;
+
+        Ok(())
+    }
+
+    /// Pull docker [image] and show result info
+    async fn pull_image(&self, image: impl Into<String>) -> Result<()> {
         let mut stream = self
             .docker
             .images()
-            .pull(&PullOptions::builder().image(ANSIBLE_IMAGE).build());
+            .pull(&PullOptions::builder().image(image).build());
 
         while let Some(pull_result) = stream.next().await {
             match pull_result {
@@ -156,9 +167,6 @@ impl TaskRunner {
                 }
             }
         }
-
-        // Setup monitoring
-        TaskMonitor::init(&self.docker).await?;
 
         Ok(())
     }
@@ -272,68 +280,31 @@ impl TaskRunner {
     /// Run the [task] isolated through docker container
     #[tracing::instrument(skip_all)]
     async fn run_task(&self, task: &Task) -> Result<Container> {
-        // TODO: think about uniq name for each task
-        // let container_name = format!("{}_{}", TASK_CONTAINER_NAME, task.id);
-
         // Delete if exists
-        if let Err(_e) = self
+        if let Err(e) = self
             .docker
             .containers()
             .get(&self.opts.container_name)
             .delete()
             .await
         {
-            // error!("Error: {}", e)
-            // container is not exists...
+            error!("Error: Failed to delete container. {}", e)
         }
 
-        // let container = self.docker.containers().get("svt-agent");
-        // let res = container
-        //     .inspect()
-        //     .await
-        //     .expect("Failed to inspect container");
-
-        let working_dir = "/app/ansible";
-
-        let mut cmd = vec![
-            "ansible-playbook".to_string(),
-            // "--limit=localhost",
-            // &format!("--inventory=./inventory/{}.yaml", self.opts.cluster),
-            // "--tags=agent".to_string(),
-            format!(
-                "--inventory={},",
-                env::var("DOCKER_HOST_IP").unwrap_or("localhost".to_string())
-            ),
-        ];
-
-        for file in &[
-            format!("{working_dir}/inventory/group_vars/all.yml").as_str(),
-            format!(
-                "{working_dir}/inventory/group_vars/{}_validators.yaml",
-                self.opts.cluster
-            )
-            .as_str(),
-            "/etc/sv_manager/sv_manager.conf",
-        ] {
-            if Path::new(file).exists() {
-                cmd.push(format!("--extra-vars=@{file}"));
-            }
-        }
-
-        cmd.push(format!("--extra-vars={}", json!(task.args)));
-        cmd.push(format!("./playbooks/{}.yaml", task.name));
+        let cmd = self.build_cmd(task);
 
         let options = ContainerOptions::builder(ANSIBLE_IMAGE)
             .name(&self.opts.container_name)
             .network_mode("host")
             .volumes_from(vec![CONTAINER_NAME])
-            .working_dir(working_dir)
+            .working_dir(TASK_WORKING_DIR)
             .cmd(cmd.iter().map(|c| c.as_str()).collect())
             .env(["ANSIBLE_HOST_KEY_CHECKING=False"])
             .build();
 
         info!("Creating task container... {:?}", &options);
         let create_info = self.docker.containers().create(&options).await?;
+
         let container = self.docker.containers().get(&create_info.id);
         info!("Container Id:{:?}", container.id());
 
@@ -345,13 +316,48 @@ impl TaskRunner {
             return Err(Error::from(e));
         }
 
+        info!("Done");
+
         Ok(container)
+    }
+
+    fn build_cmd(&self, task: &Task) -> Vec<String> {
+        let mut cmd = vec![
+            "ansible-playbook".to_string(),
+            // "--limit=localhost",
+            // &format!("--inventory=./inventory/{}.yaml", self.opts.cluster),
+            // "--tags=agent".to_string(),
+            format!(
+                "--inventory={},",
+                env::var("DOCKER_HOST_IP").unwrap_or("localhost".to_string())
+            ),
+        ];
+
+        for file in TASK_CONFIG_FILES {
+            let file = file
+                .replace("{home}", TASK_WORKING_DIR)
+                .replace("{cluster}", &self.opts.cluster.to_string());
+
+            if Path::new(&file).exists() {
+                cmd.push(format!("--extra-vars=@{}", file));
+            }
+        }
+
+        if !task.args.is_empty() {
+            cmd.push(format!("--extra-vars={}", json!(task.args)));
+        }
+
+        cmd.push(format!("./playbooks/{}.yaml", task.name));
+
+        cmd
     }
 
     /// Deduplicate the [queue]
     pub fn dedup(&mut self) {
-        let mut uniques = HashSet::new();
-        self.queue.retain(|e| uniques.insert(e.id));
+        if !self.queue.is_empty() {
+            let mut uniques = HashSet::new();
+            self.queue.retain(|e| uniques.insert(e.id));
+        }
     }
 
     /// Clear the [queue]
@@ -472,20 +478,51 @@ mod tests {
     use std::env;
     use tracing_test::traced_test;
 
-    #[tokio::test]
-    #[traced_test]
-    async fn test_runner() {
-        let mut playbooks = env::current_dir().unwrap();
-        playbooks.push("ansible");
-
-        let mut runner = TaskRunner::new(TaskRunnerOpts::new(&AgentArgs {
+    fn get_task_runner() -> TaskRunner {
+        TaskRunner::new(TaskRunnerOpts::new(&AgentArgs {
             keypair: Default::default(),
             cluster: Default::default(),
             channel_id: Default::default(),
             program_id: Default::default(),
             working_dir: None,
             monitor_port: 0,
-        }));
+        }))
+    }
+
+    #[test]
+    fn test_build_cmd() {
+        let mut runner = get_task_runner();
+
+        let mut task = Task {
+            id: 1,
+            name: "restart".to_string(),
+            args: Default::default(),
+            secret: "".to_string(),
+            action: "".to_string(),
+        };
+
+        let cmd = runner.build_cmd(&task);
+
+        assert_eq!(cmd[0], "ansible-playbook");
+        assert_eq!(cmd[1], "--inventory=localhost,");
+        assert_eq!(cmd[2], format!("./playbooks/{}.yaml", task.name));
+
+        env::set_var("DOCKER_HOST_IP", "1.2.3.4");
+        task.args = HashMap::from([("a".to_string(), "1".to_string())]);
+
+        let cmd = runner.build_cmd(&task);
+
+        assert_eq!(cmd[1], "--inventory=1.2.3.4,");
+        assert_eq!(cmd[2], "--extra-vars={\"a\":\"1\"}");
+    }
+
+    #[tokio::test]
+    #[traced_test]
+    async fn test_runner() {
+        let mut playbooks = env::current_dir().unwrap();
+        playbooks.push("ansible");
+
+        let mut runner = get_task_runner();
 
         let task = Task {
             id: 0,

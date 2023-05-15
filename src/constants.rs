@@ -11,7 +11,7 @@ pub const WAIT_ACTION_INTERVAL: u64 = 5000;
 pub const WAIT_AUTHORIZATION_INTERVAL: u64 = 10000;
 
 /// Required balance before running commands
-pub const MIN_BALANCE_REQUIRED: u64 = 5000; // one tx cost
+pub const MIN_BALANCE_REQUIRED: u64 = 5000; // lamports
 
 /// @link: https://hub.docker.com/r/willhallonline/ansible
 pub const ANSIBLE_IMAGE: &str = "willhallonline/ansible:2.13.7-alpine-3.15";
@@ -22,6 +22,15 @@ pub const CONTAINER_NAME: &str = "svt-agent";
 pub const AGENT_NAME: &str = "agent";
 
 pub const DEFAULT_MONITOR_PORT: &str = "8888";
+
+/// Configuration files to be added to each task as `--extra-vars=@file`
+pub const TASK_CONFIG_FILES: &[&str] = &[
+    "{home}/inventory/group_vars/all.yml",
+    "{home}/inventory/group_vars/{cluster}_validators.yaml",
+    "/etc/sv_manager/sv_manager.conf",
+];
+
+pub const TASK_WORKING_DIR: &str = "/app/ansible";
 
 // Notifier settings
 
