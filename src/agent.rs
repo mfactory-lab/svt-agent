@@ -21,6 +21,8 @@ use tokio::task::JoinHandle;
 use tokio::time;
 use tracing::{debug, error, info, warn};
 
+const LOGS_SUBSCRIBE_TIMEOUT: u64 = 5;
+
 pub struct Agent {
     ctx: Arc<AgentContext>,
 }
@@ -130,6 +132,7 @@ impl Agent {
                                         info!("Waiting a command...");
                                     }
                                     time::sleep(Duration::from_millis(WAIT_COMMAND_INTERVAL)).await;
+                                    continue;
                                 }
                             }
                             Err(e) => {
@@ -239,9 +242,9 @@ impl Agent {
                     // On disconnect, retry every 5s.
                     interval.tick().await;
 
-                    info!("Connecting to `{}`...", url);
+                    info!("Connecting to `{}`...", &url);
 
-                    match PubsubClient::new(url.as_str()).await {
+                    match PubsubClient::new(&url).await {
                         Ok(pub_sub_client) => {
                             info!("Connected!");
 
@@ -251,7 +254,9 @@ impl Agent {
                             let listener =
                                 Listener::new(&ctx.client.program_id, &pub_sub_client, &filter);
 
-                            let logs_subscribe = listener.logs_subscribe().await;
+                            let logs_subscribe = listener
+                                .logs_subscribe(Duration::from_secs(LOGS_SUBSCRIBE_TIMEOUT))
+                                .await;
 
                             info!("Listen new events...");
                             match logs_subscribe {
@@ -333,7 +338,9 @@ pub struct AgentContext {
 impl AgentContext {
     #[tracing::instrument(skip_all)]
     async fn init(&self) -> Result<()> {
-        self.runner.lock().await.init().await?;
+        {
+            self.runner.lock().await.init().await?;
+        }
 
         loop {
             match self.authorize().await {
@@ -462,10 +469,12 @@ mod test {
     async fn test_agent_init() {
         let keypair = PathBuf::from("./keypair.json");
 
+        pub const CHANNEL_ID: &str = "Bk1EAvKminEwHjyVhG2QA7sQeU1W3zPnFE6rTnLWDKYJ";
+
         let agent = Agent::new(&AgentArgs {
             keypair,
             cluster: Cluster::Devnet,
-            channel_id: DEFAULT_CHANNEL_ID.parse().unwrap(),
+            channel_id: CHANNEL_ID.parse().unwrap(),
             program_id: MESSENGER_PROGRAM_ID.parse().unwrap(),
             ..Default::default()
         })

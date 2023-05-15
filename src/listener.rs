@@ -1,5 +1,6 @@
 use crate::messenger::NewMessageEvent;
 use anchor_client::solana_client::nonblocking::pubsub_client::{PubsubClient, PubsubClientResult};
+use anchor_client::solana_client::pubsub_client::PubsubClientError;
 use anchor_client::solana_client::rpc_client::RpcClient;
 use anchor_client::solana_client::rpc_config::{
     RpcTransactionLogsConfig, RpcTransactionLogsFilter,
@@ -14,7 +15,11 @@ use anyhow::Result;
 use futures::future::BoxFuture;
 use futures::stream::BoxStream;
 use regex::Regex;
+use std::time::Duration;
 use tracing::{debug, info, warn};
+
+type UnsubscribeFn = Box<dyn FnOnce() -> BoxFuture<'static, ()> + Send>;
+type SubscribeResult<'a, T> = PubsubClientResult<(BoxStream<'a, T>, UnsubscribeFn)>;
 
 /// Listen to events in the blockchain through program logs
 /// The event is the serialized data in the "Program data:" section.
@@ -45,13 +50,20 @@ impl<'a> Listener<'a> {
 
     pub async fn logs_subscribe(
         &self,
-    ) -> PubsubClientResult<(
-        BoxStream<'_, Response<RpcLogsResponse>>,
-        Box<dyn FnOnce() -> BoxFuture<'static, ()> + Send>,
-    )> {
-        self.client
-            .logs_subscribe(self.filter.clone(), self.config.clone())
-            .await
+        timeout: Duration,
+    ) -> SubscribeResult<Response<RpcLogsResponse>> {
+        let task = self
+            .client
+            .logs_subscribe(self.filter.clone(), self.config.clone());
+
+        tokio::select! {
+            res = task => {
+                res
+            }
+            _ = tokio::time::sleep(timeout) => {
+                Err(PubsubClientError::ConnectionClosed(format!("Timeout exceeded: {}s", timeout.as_secs())))
+            }
+        }
     }
 
     pub fn on<T: Event>(&self, log: &Response<RpcLogsResponse>, f: &impl Fn(T)) -> &Self {
