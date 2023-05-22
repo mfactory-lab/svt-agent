@@ -185,7 +185,7 @@ impl TaskRunner {
             let notifier_opts = NotifierOpts::new()
                 .with_cluster(self.opts.cluster.clone())
                 .with_channel_id(self.opts.channel_id);
-            let mut notifier = Notifier::new(&notifier_opts, &task);
+            let mut notifier = Notifier::new(&notifier_opts).with_task(&task);
             // probably docker error
             let mut internal_error: Option<Error> = None;
             let mut status_code: Option<u64> = None;
@@ -384,13 +384,6 @@ impl TaskRunner {
     /// Delete [task] from the queue
     pub fn delete_task(&mut self, task_id: u64) {
         self.queue.retain(|t| t.id != task_id);
-    }
-
-    pub async fn notify_event(&self, task: &Task, event: &str) -> Result<()> {
-        let opts = NotifierOpts::new()
-            .with_cluster(self.opts.cluster.clone())
-            .with_channel_id(self.opts.channel_id);
-        Notifier::new(&opts, task).notify(event).await
     }
 
     #[tracing::instrument(skip(self))]

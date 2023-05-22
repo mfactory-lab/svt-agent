@@ -9,6 +9,8 @@ use anchor_client::solana_client::nonblocking::pubsub_client::{PubsubClient, Pub
 use anchor_client::solana_client::rpc_config::RpcTransactionLogsFilter;
 use anchor_client::solana_sdk::signature::read_keypair_file;
 
+use crate::notifier::{Notifier, NotifierOpts};
+use anchor_client::solana_sdk::signer::Signer;
 use anchor_lang::prelude::Pubkey;
 use anchor_lang::Event;
 use anyhow::{Error, Result};
@@ -188,7 +190,7 @@ impl Agent {
                                                 info!("Task #{} was skipped...", new_task.id);
                                                 if task.id == new_task.id {
                                                     runner.reset_state().await;
-                                                    if runner.notify_event(&task, "skip").await.is_err() {
+                                                    if ctx.notify_event("skip", Some(&task)).await.is_err() {
                                                         info!("Failed to send skip notify...");
                                                     }
                                                 }
@@ -342,9 +344,18 @@ impl AgentContext {
             self.runner.lock().await.init().await?;
         }
 
+        if self.notify_event("start", None).await.is_err() {
+            info!("Failed to send `start` notify...");
+        }
+
         loop {
             match self.authorize().await {
-                Ok(_) => break,
+                Ok(_) => {
+                    if self.notify_event("authorize", None).await.is_err() {
+                        info!("Failed to send `authorize` notify...");
+                    }
+                    break;
+                }
                 Err(e) => {
                     warn!("Auth Error: {}", e);
                     time::sleep(Duration::from_millis(WAIT_AUTHORIZATION_INTERVAL)).await;
@@ -442,6 +453,26 @@ impl AgentContext {
         info!("Added {} tasks to the runner queue...", added);
 
         Ok(())
+    }
+
+    async fn notify_event(&self, event: &str, task: Option<&Task>) -> Result<()> {
+        let agent_id = self.client.authority_pubkey();
+        let cluster = self.client.cluster.clone();
+        let opts = NotifierOpts::new()
+            .with_agent_id(agent_id)
+            .with_cluster(cluster)
+            .with_channel_id(self.channel_id);
+
+        {
+            let n = Notifier::new(&opts);
+            if let Some(t) = task {
+                n.with_task(t)
+            } else {
+                n
+            }
+        }
+        .notify(event)
+        .await
     }
 }
 

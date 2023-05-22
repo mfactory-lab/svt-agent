@@ -20,8 +20,10 @@ use tracing_subscriber::filter::combinator::Not;
 #[derive(Default, Clone)]
 pub struct NotifierOpts {
     pub channel_id: Pubkey,
+    pub agent_id: Pubkey,
     pub cluster: Cluster,
     pub logs_path: Option<PathBuf>,
+    pub host_os: String,
     pub webhook_url: String,
     pub influx_url: String,
     pub influx_db: String,
@@ -33,6 +35,7 @@ pub struct NotifierOpts {
 impl NotifierOpts {
     pub fn new() -> Self {
         Self {
+            host_os: std::env::var("DOCKER_HOST_OS").unwrap_or_default(),
             influx_url: std::env::var("AGENT_NOTIFY_INFLUX_URL")
                 .unwrap_or_else(|_| NOTIFY_INFLUX_URL.to_string()),
             influx_db: std::env::var("AGENT_NOTIFY_INFLUX_DB")
@@ -63,8 +66,18 @@ impl NotifierOpts {
         self
     }
 
+    pub fn with_agent_id(mut self, agent_id: Pubkey) -> Self {
+        self.agent_id = agent_id;
+        self
+    }
+
     pub fn with_cluster(mut self, cluster: Cluster) -> Self {
         self.cluster = cluster;
+        self
+    }
+
+    pub fn with_host_os<T: Into<String>>(mut self, host_os: T) -> Self {
+        self.host_os = host_os.into();
         self
     }
 
@@ -80,23 +93,27 @@ impl NotifierOpts {
 }
 
 pub struct Notifier<'a> {
-    /// The [Task] which will be notified
-    task: &'a Task,
     /// Notifier options
     opts: &'a NotifierOpts,
     /// Parameters to be sent
     params: HashMap<&'a str, String>,
+    /// The [Task] which will be notified
+    task: Option<&'a Task>,
 }
 
 impl<'a> Notifier<'a> {
-    pub fn new(opts: &'a NotifierOpts, task: &'a Task) -> Self {
+    pub fn new(opts: &'a NotifierOpts) -> Self {
         Self {
-            task,
             opts,
+            task: None,
             params: Default::default(),
         }
     }
 
+    pub fn with_task(mut self, task: &'a Task) -> Self {
+        self.task = Some(task);
+        self
+    }
     pub async fn notify_start(&self) -> Result<()> {
         self.notify("start").await
     }
@@ -114,7 +131,9 @@ impl<'a> Notifier<'a> {
 
     #[tracing::instrument(skip_all)]
     pub async fn notify(&self, event: &str) -> Result<()> {
-        info!("Task #{} notify({})", self.task.id, event);
+        if let Some(task) = self.task {
+            info!("Task #{} notify({})", task.id, event);
+        }
 
         let (save_result, influx_result, webhook_result) = tokio::join!(
             self.save_to_file(),
@@ -144,7 +163,11 @@ impl<'a> Notifier<'a> {
                 .get("output")
                 .or_else(|| self.params.get("error"))
             {
-                let file_name = format!("{}_{}.log", self.task.id, Utc::now().format("%Y%m%d%H%M"));
+                let file_name = format!(
+                    "{}_{}.log",
+                    self.task.map_or(0, |t| t.id),
+                    Utc::now().format("%Y%m%d%H%M")
+                );
 
                 let path = path.join(&file_name);
 
@@ -178,11 +201,15 @@ impl<'a> Notifier<'a> {
         if !self.opts.webhook_url.is_empty() {
             let client = hyper::Client::new();
             let mut params = self.params.clone();
-            params.insert("agent_version", env!("CARGO_PKG_VERSION").to_string());
+            params.insert("event", event.into());
             params.insert("cluster", self.opts.cluster.to_string());
             params.insert("channel_id", self.opts.channel_id.to_string());
-            params.insert("task_id", self.task.id.to_string());
-            params.insert("event", event.into());
+            params.insert("agent_id", self.opts.agent_id.to_string());
+            params.insert("agent_version", env!("CARGO_PKG_VERSION").to_string());
+
+            if let Some(t) = self.task {
+                params.insert("task_id", t.id.to_string());
+            }
 
             let data = json!(params);
 
@@ -211,14 +238,23 @@ impl<'a> Notifier<'a> {
             return Err(Error::msg("Channel id required"));
         }
 
-        let write_query = Timestamp::from(Utc::now())
-            .into_query("task_logs")
-            .add_field("cluster", self.opts.cluster.to_string())
-            .add_field("channel_id", self.opts.channel_id.to_string())
-            .add_field("task_id", self.task.id)
-            .add_field("task_name", self.task.name.to_string())
-            .add_field("agent_version", env!("CARGO_PKG_VERSION"))
-            .add_tag("event", event.into());
+        let mut write_query = {
+            let q = Timestamp::from(Utc::now())
+                .into_query("task_logs")
+                .add_tag("event", event.into())
+                .add_field("host_os", self.opts.host_os.to_string())
+                .add_field("cluster", self.opts.cluster.to_string())
+                .add_field("channel_id", self.opts.channel_id.to_string())
+                .add_field("agent_id", self.opts.agent_id.to_string())
+                .add_field("agent_version", env!("CARGO_PKG_VERSION"));
+
+            if let Some(t) = self.task {
+                q.add_field("task_id", t.id)
+                    .add_field("task_name", t.name.to_string())
+            } else {
+                q
+            }
+        };
 
         info!("[Influx] Request `{:?}` ...", write_query);
 
