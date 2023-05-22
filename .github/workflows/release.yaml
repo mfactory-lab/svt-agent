@@ -10,10 +10,11 @@ name: Release
 #      - "completed"
 
 on:
-  push:
-    branches: [ dev ]
-    paths:
-      - Cargo.toml
+#  push:
+#    branches: [ dev ]
+#    paths:
+#      - Cargo.toml
+
   workflow_dispatch:
     inputs:
       tag:
