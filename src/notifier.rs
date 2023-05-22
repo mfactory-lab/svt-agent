@@ -114,6 +114,7 @@ impl<'a> Notifier<'a> {
         self.task = Some(task);
         self
     }
+
     pub async fn notify_start(&self) -> Result<()> {
         self.notify("start").await
     }
