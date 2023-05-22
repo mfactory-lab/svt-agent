@@ -5,3 +5,5 @@ Dockerfile
 .gitignore
 .idea
 .DS_Store
+
+ansible/db
