@@ -5,12 +5,11 @@
 # SVT Agent installation script
 #
 # Stable version:
-#   CID=QXK7qRCaabreGjcNHcKEadQDtTY9BJKHKfU11QAE6Xp \
+#   CID=Bk1EAvKminEwHjyVhG2QA7sQeU1W3zPnFE6rTnLWDKYJ \
 #   bash -c "$(curl -sSfL https://mfactory-lab.github.io/svt-agent/install.sh)"
 #
 # Nightly version:
-#   AGENT_RELEASE=nightly CID=QXK7qRCaabreGjcNHcKEadQDtTY9BJKHKfU11QAE6Xp \
-#   bash -c "$(curl -sSfL https://mfactory-lab.github.io/svt-agent/install.sh)"
+#   CID=Bk1EAvKminEwHjyVhG2QA7sQeU1W3zPnFE6rTnLWDKYJ AGENT_RELEASE=nightly bash -c "$(curl -sSfL https://mfactory-lab.github.io/svt-agent/install-dev.sh)"
 #
 
 IMAGE_NAME=ghcr.io/mfactory-lab/svt-agent
@@ -87,10 +86,10 @@ do_install() {
     -v $SSHKEY_PATH:/root/.ssh \
     -v $KEYPAIR_PATH:/app/keypair.json \
     -v $WORKING_DIR/logs:/app/logs \
-    -e DOCKER_HOST_IP=$IP_ADDR \
-    -e DOCKER_HOST_OS=$OS \
-    -e AGENT_CLUSTER=$CLUSTER \
-    -e AGENT_CHANNEL_ID=$CID \
+    -e DOCKER_HOST_IP="$IP_ADDR" \
+    -e DOCKER_HOST_OS="$OS" \
+    -e AGENT_CLUSTER="$CLUSTER" \
+    -e AGENT_CHANNEL_ID="$CID" \
     $IMAGE_NAME:$AGENT_RELEASE \
     run)"
 
