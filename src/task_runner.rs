@@ -1,4 +1,7 @@
-use crate::constants::{ANSIBLE_IMAGE, CONTAINER_NAME, TASK_CONFIG_FILES, TASK_WORKING_DIR};
+use crate::constants::{
+    ANSIBLE_DEFAULT_TAG, ANSIBLE_IMAGE, CONTAINER_NAME, TASK_CONFIG_FILES, TASK_VERSION_ARG,
+    TASK_WORKING_DIR,
+};
 use crate::monitor::{TaskMonitor, TaskMonitorOptions};
 use crate::notifier::{Notifier, NotifierOpts};
 use crate::AgentArgs;
@@ -124,7 +127,6 @@ impl TaskRunner {
 
     /// Prepare the runner before run tasks
     /// Check is valid `working_dir`
-    /// Pull [ANSIBLE_IMAGE] if not exists
     #[tracing::instrument(skip_all)]
     pub async fn init(&mut self) -> Result<()> {
         if !self.opts.working_dir.is_dir() {
@@ -143,7 +145,7 @@ impl TaskRunner {
         self.load_state().await?;
 
         // pull ansible image if needed
-        self.pull_image(ANSIBLE_IMAGE).await?;
+        // self.pull_image(ANSIBLE_IMAGE).await?;
 
         // setup monitoring
         TaskMonitor::init(&self.docker).await?;
@@ -291,13 +293,18 @@ impl TaskRunner {
             error!("Error: Failed to delete container. {}", e)
         }
 
+        // pull ansible image if needed
+        // self.pull_image(&self.build_image_name(task)).await?;
+
         let cmd = self.build_cmd(task);
 
-        let options = ContainerOptions::builder(ANSIBLE_IMAGE)
+        let options = ContainerOptions::builder(&self.build_image_name(task))
             .name(&self.opts.container_name)
-            .network_mode("host")
-            .volumes_from(vec![CONTAINER_NAME])
             .working_dir(TASK_WORKING_DIR)
+            .network_mode("host")
+            // .volumes_from(vec![CONTAINER_NAME])
+            // `/ansible-custom` will be copied to the `/ansible`
+            .volumes(vec!["/app/ansible", "/ansible-custom"])
             .cmd(cmd.iter().map(|c| c.as_str()).collect())
             .env(["ANSIBLE_HOST_KEY_CHECKING=False"])
             .build();
@@ -319,6 +326,15 @@ impl TaskRunner {
         info!("Done");
 
         Ok(container)
+    }
+
+    fn build_image_name(&self, task: &Task) -> String {
+        let version = task
+            .args
+            .get(TASK_VERSION_ARG)
+            .map_or(ANSIBLE_DEFAULT_TAG, |v| v.as_str());
+
+        format!("{}:{}", ANSIBLE_IMAGE, version)
     }
 
     fn build_cmd(&self, task: &Task) -> Vec<String> {

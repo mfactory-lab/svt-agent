@@ -14,13 +14,16 @@ pub const WAIT_AUTHORIZATION_INTERVAL: u64 = 10000;
 pub const MIN_BALANCE_REQUIRED: u64 = 5000; // lamports
 
 /// @link: https://hub.docker.com/r/willhallonline/ansible
-pub const ANSIBLE_IMAGE: &str = "willhallonline/ansible:2.13.7-alpine-3.15";
+// pub const ANSIBLE_IMAGE: &str = "willhallonline/ansible:2.13.7-alpine-3.15";
+pub const ANSIBLE_IMAGE: &str = "ghcr.io/mfactory-lab/sv-manager";
+pub const ANSIBLE_DEFAULT_TAG: &str = "agent-latest";
 
 pub const CONTAINER_NAME: &str = "svt-agent";
 
 /// Display name in the channel
 pub const AGENT_NAME: &str = "agent";
 
+/// The task monitor will be launched on this port
 pub const DEFAULT_MONITOR_PORT: &str = "8888";
 
 /// Configuration files to be added to each task as `--extra-vars=@file`
@@ -30,7 +33,8 @@ pub const TASK_CONFIG_FILES: &[&str] = &[
     "/etc/sv_manager/sv_manager.conf",
 ];
 
-pub const TASK_WORKING_DIR: &str = "/app/ansible";
+pub const TASK_VERSION_ARG: &str = "pb-version";
+pub const TASK_WORKING_DIR: &str = "/ansible";
 
 // Notifier settings
 
