@@ -1,25 +1,16 @@
 name: Release Nightly
 
-#permissions:
-#  contents: "write"
-#
-#on:
-#  workflow_run:
-#    workflows: ["Tag"]
-#    types:
-#      - "completed"
-
 on:
   push:
     branches: [ dev ]
     paths:
       - Cargo.toml
-#      - src/**
   workflow_dispatch:
 
 env:
   REGISTRY: ghcr.io
   IMAGE_NAME: ${{ github.repository }}
+  IMAGE_TAG: nightly
 
 jobs:
 
@@ -67,7 +58,7 @@ jobs:
           push: true
           tags: |
             ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ needs.get-tag.outputs.pkg-version }}
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:nightly
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
