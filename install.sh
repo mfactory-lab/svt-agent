@@ -71,7 +71,6 @@ do_install() {
   fi
 
   IP_ADDR=$(hostname -I | cut -f1 -d' ')
-  OS=$(detect_os)
 
   say "Starting docker container..."
   CONTAINER_ID="$(docker run -d -it --restart=always --name $CONTAINER_NAME \
@@ -85,7 +84,6 @@ do_install() {
     -v $KEYPAIR_PATH:/app/keypair.json \
     -v $WORKING_DIR/logs:/app/logs \
     -e DOCKER_HOST_IP=$IP_ADDR \
-    -e DOCKER_HOST_OS=$OS \
     -e AGENT_CLUSTER=$CLUSTER \
     -e AGENT_CHANNEL_ID=$CID \
     $IMAGE_NAME:$AGENT_RELEASE \
@@ -100,9 +98,8 @@ do_install() {
   say "Please add some balance to the agent address."
   say ""
   say "Cluster: $CLUSTER"
-  say "Agent Address: $PUBKEY"
+  say "Agent Address(Pubkey): $PUBKEY"
   say "Host Address: $IP_ADDR"
-  say "Host OS: $OS"
   say ""
   say "Done"
 }
@@ -138,45 +135,6 @@ check_cmd() {
 
 say() {
   printf 'svt-agent: %s\n' "$1"
-}
-
-# Retrieves the operating system information.
-# This function checks various methods to determine the OS and its version,
-# including checking the /etc/os-release file, using the lsb_release command,
-# and fallback options such as /etc/lsb-release, /etc/debian_version, and uname command.
-# The OS and version information are stored in the variables OS and VER, respectively.
-# Returns the OS and version as a string in the format "OS, Version".
-detect_os() {
-  if [ -f /etc/os-release ]; then
-    # freedesktop.org and systemd
-    . /etc/os-release
-    OS=$NAME
-    VER=$VERSION_ID
-  elif command -v lsb_release >/dev/null 2>&1; then
-    # linuxbase.org
-    OS=$(lsb_release -si)
-    VER=$(lsb_release -sr)
-  elif [ -f /etc/lsb-release ]; then
-    # For some versions of Debian/Ubuntu without lsb_release command
-    . /etc/lsb-release
-    OS=$DISTRIB_ID
-    VER=$DISTRIB_RELEASE
-  elif [ -f /etc/debian_version ]; then
-    # Older Debian/Ubuntu/etc.
-    OS=Debian
-    VER=$(cat /etc/debian_version)
-  elif [ -f /etc/SuSe-release ]; then
-    # Older SuSE/etc.
-    ...
-  elif [ -f /etc/redhat-release ]; then
-    # Older Red Hat, CentOS, etc.
-    ...
-  else
-    # Fall back to uname, e.g. "Linux <version>", also works for BSD, etc.
-    OS=$(uname -s)
-    VER=$(uname -r)
-  fi
-  echo "$OS, $VER"
 }
 
 err() {
