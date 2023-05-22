@@ -11,16 +11,23 @@ name: Release
 
 on:
   push:
-    branches: [ main ]
+    branches: [ dev ]
     paths:
       - Cargo.toml
-#      - src/**
   workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag"
+        required: true
+        default: "latest"
+        type: choice
+        options:
+          - latest
+          - nightly
 
 env:
   REGISTRY: ghcr.io
   IMAGE_NAME: ${{ github.repository }}
-  IMAGE_TAG: latest
 
 jobs:
 
@@ -68,7 +75,7 @@ jobs:
           push: true
           tags: |
             ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ needs.get-tag.outputs.pkg-version }}
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ inputs.tag }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
