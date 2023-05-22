@@ -10,8 +10,8 @@ edition = "2021"
 anyhow = "^1.0"
 clap = { version = "^4.2.7", features = ["derive", "env"] }
 chrono = { version = "^0.4", features = ["clock"] }
-anchor-client = "^0.26.0"
-anchor-lang = "^0.26.0"
+anchor-client = "^0.27.0"
+anchor-lang = "^0.27.0"
 hyper = { version = "0.14", features = ["client"] }
 tokio = "^1.22"
 tracing = "^0.1"
