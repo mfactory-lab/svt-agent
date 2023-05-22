@@ -18,10 +18,10 @@ WORKING_DIR="$HOME/svt-agent"
 KEYPAIR_PATH="$WORKING_DIR/keypair.json"
 
 # ARE YOU ROOT (or sudo)?
-#if [[ $EUID -ne 0 ]]; then
-#	echo -e "ERROR: This script must be run as root"
-#	exit 1
-#fi
+if [[ $EUID -ne 0 ]]; then
+	echo -e "ERROR: This script must be run as root"
+	exit 1
+fi
 
 do_install() {
   echo "Installing SVT Agent..."
@@ -100,8 +100,9 @@ do_install() {
   say "Please add some balance to the agent address."
   say ""
   say "Cluster: $CLUSTER"
-  say "Agent Address(Pubkey): $PUBKEY"
+  say "Agent Address: $PUBKEY"
   say "Host Address: $IP_ADDR"
+  say "Host OS: $OS"
   say ""
   say "Done"
 }
