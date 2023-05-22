@@ -4,8 +4,12 @@
 #
 # SVT Agent installation script
 #
-# Run command:
-#   CLUSTER=devnet CID=QXK7qRCaabreGjcNHcKEadQDtTY9BJKHKfU11QAE6Xp \
+# Stable version:
+#   CID=QXK7qRCaabreGjcNHcKEadQDtTY9BJKHKfU11QAE6Xp \
+#   bash -c "$(curl -sSfL https://mfactory-lab.github.io/svt-agent/install.sh)"
+#
+# Nightly version:
+#   AGENT_RELEASE=nightly CID=QXK7qRCaabreGjcNHcKEadQDtTY9BJKHKfU11QAE6Xp \
 #   bash -c "$(curl -sSfL https://mfactory-lab.github.io/svt-agent/install.sh)"
 #
 
@@ -55,7 +59,7 @@ do_install() {
   say "Cleaning up..."
   docker stop $CONTAINER_NAME 2>/dev/null 1>/dev/null
   docker container rm -f -v $CONTAINER_NAME 2>/dev/null 1>/dev/null
-  docker volume rm -f "$CONTAINER_NAME-ansible" 2>/dev/null 1>/dev/null
+#  docker volume rm -f "$CONTAINER_NAME-ansible" 2>/dev/null 1>/dev/null
 
   say "Try to generate agent keypair..."
   if [[ -f $KEYPAIR_PATH ]]; then
@@ -80,7 +84,6 @@ do_install() {
     --log-opt max-file=5 \
     -v /var/run/docker.sock:/var/run/docker.sock \
     -v /etc/sv_manager:/etc/sv_manager \
-    -v svt-agent-ansible:/app/ansible \
     -v $SSHKEY_PATH:/root/.ssh \
     -v $KEYPAIR_PATH:/app/keypair.json \
     -v $WORKING_DIR/logs:/app/logs \
