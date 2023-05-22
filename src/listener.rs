@@ -1,6 +1,7 @@
 use crate::messenger::NewMessageEvent;
-use anchor_client::solana_client::nonblocking::pubsub_client::{PubsubClient, PubsubClientResult};
-use anchor_client::solana_client::pubsub_client::PubsubClientError;
+use anchor_client::solana_client::nonblocking::pubsub_client::{
+    PubsubClient, PubsubClientError, PubsubClientResult,
+};
 use anchor_client::solana_client::rpc_client::RpcClient;
 use anchor_client::solana_client::rpc_config::{
     RpcTransactionLogsConfig, RpcTransactionLogsFilter,
