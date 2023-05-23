@@ -34,9 +34,10 @@ influxdb = { version = "0.6.0", default-features = false, features = ["hyper-cli
 tracing-test = "0.2.3"
 
 [profile.release]
+#strip = true
 incremental = true
 codegen-units = 1
 opt-level = 2
-lto = true
+lto = "fat"
 #panic = "abort"
 #debug = false
