@@ -184,14 +184,14 @@ impl TaskRunner {
             let notifier_opts = NotifierOpts::new()
                 .with_cluster(self.opts.cluster.clone())
                 .with_channel_id(self.opts.channel_id);
-            let mut notifier = Notifier::new(&notifier_opts).with_task(&task);
+            let mut notifier = Notifier::new(notifier_opts).with_task(&task);
             // probably docker error
             let mut internal_error: Option<Error> = None;
             let mut status_code: Option<u64> = None;
 
             match self.run_task(&task).await {
                 Ok(container) => {
-                    let _ = notifier.notify_start().await;
+                    let _ = notifier.notify_task_start().await;
                     self.set_state(RunState::Processing(task.clone())).await.ok();
 
                     let monitor_opts = TaskMonitorOptions::new()
@@ -231,7 +231,7 @@ impl TaskRunner {
                         if status_code == 0 {
                             self.set_state(RunState::Complete(task.clone())).await.ok();
                             let output = get_container_logs(&container, ContainerLogFlags::StdOut).await;
-                            let _ = notifier.notify_finish(status_code, output).await;
+                            let _ = notifier.notify_task_finish(status_code, output).await;
                         } else {
                             self.set_state(RunState::Error(task.clone())).await.ok();
                             let output = get_container_logs(
@@ -242,7 +242,7 @@ impl TaskRunner {
                                 },
                             )
                             .await;
-                            notifier.notify_error(output).await.ok();
+                            notifier.notify_task_error(output).await.ok();
                         }
                     }
 
@@ -264,7 +264,7 @@ impl TaskRunner {
 
             if let Some(e) = internal_error {
                 self.set_state(RunState::Error(task.clone())).await.ok();
-                notifier.notify_error(e.to_string()).await.ok();
+                notifier.notify_task_error(e.to_string()).await.ok();
                 return Err(e);
             }
         }
@@ -483,6 +483,28 @@ mod tests {
             working_dir: None,
             monitor_port: 0,
         }))
+    }
+
+    #[test]
+    fn test_build_name() {
+        let mut runner = get_task_runner();
+
+        let version = "test";
+
+        let mut task = Task {
+            id: 1,
+            name: "test".to_string(),
+            args: Default::default(),
+            secret: "".to_string(),
+            action: "".to_string(),
+        };
+
+        let cmd = runner.build_image_name(&task);
+        assert_eq!(cmd, format!("{}:{}", ANSIBLE_IMAGE, ANSIBLE_DEFAULT_TAG));
+
+        task.args = HashMap::from([(TASK_VERSION_ARG.to_string(), version.to_string())]);
+        let cmd = runner.build_image_name(&task);
+        assert_eq!(cmd, format!("{}:{}", ANSIBLE_IMAGE, version));
     }
 
     #[test]

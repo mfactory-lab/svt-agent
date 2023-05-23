@@ -131,15 +131,45 @@ impl<'a> TaskMonitorOptions<'a> {
     }
 }
 
-#[tokio::test]
-async fn test_monitor() {
-    let docker = Docker::new();
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+    use wiremock::matchers::{method, path, path_regex};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
 
-    let opts = TaskMonitorOptions::new().filter("monitor");
+    #[tokio::test]
+    async fn test_monitor() {
+        let mock_server = MockServer::start().await;
 
-    let mut monitor = TaskMonitor::new(&opts, &docker);
+        let id = "ede54ee1afda366ab42f824e8a5ffd195155d853ceaec74a927f249ea270c743";
 
-    let r = monitor.start().await;
+        Mock::given(method("POST"))
+            .and(path("/containers/create"))
+            .respond_with(ResponseTemplate::new(201).set_body_json(json!({ "Id": id })))
+            .mount(&mock_server)
+            .await;
 
-    println!("{:?}", r);
+        Mock::given(method("POST"))
+            .and(path_regex(r"^/containers/(.+)/(start|stop)$"))
+            .respond_with(ResponseTemplate::new(200))
+            .mount(&mock_server)
+            .await;
+
+        let docker = Docker::host(mock_server.uri().parse().unwrap());
+
+        let opts = TaskMonitorOptions::new().filter("monitor");
+
+        let mut monitor = TaskMonitor::new(&opts, &docker);
+
+        let res = monitor.start().await;
+
+        assert!(monitor.container.is_some());
+        assert!(monitor.is_started());
+
+        monitor.stop().await;
+
+        assert!(monitor.container.is_none());
+        assert!(!monitor.is_started());
+    }
 }
