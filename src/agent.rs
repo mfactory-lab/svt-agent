@@ -357,7 +357,7 @@ impl AgentContext {
                     break;
                 }
                 Err(e) => {
-                    warn!("Auth Error: {}", e);
+                    warn!("Auth Error: {:?}", e);
                     time::sleep(Duration::from_millis(WAIT_AUTHORIZATION_INTERVAL)).await;
                 }
             }

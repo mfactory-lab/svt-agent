@@ -164,7 +164,7 @@ impl TaskRunner {
             match pull_result {
                 Ok(output) => info!("{:?}", output),
                 Err(e) => {
-                    info!("Error: {}", e);
+                    info!("Error: {:?}", e);
                     return Err(Error::from(e));
                 }
             }
@@ -294,7 +294,7 @@ impl TaskRunner {
         }
 
         // pull ansible image if needed
-        // self.pull_image(&self.build_image_name(task)).await?;
+        self.pull_image(&self.build_image_name(task)).await?;
 
         let cmd = self.build_cmd(task);
 
