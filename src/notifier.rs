@@ -36,6 +36,8 @@ impl NotifierOpts {
     pub fn new() -> Self {
         Self {
             host_os: std::env::var("DOCKER_HOST_OS").unwrap_or_default(),
+            logs_path: std::env::var("AGENT_LOGS_PATH")
+                .map_or(DEFAULT_LOGS_PATH.map(PathBuf::from), |p| Some(PathBuf::from(p))),
             influx_url: std::env::var("AGENT_NOTIFY_INFLUX_URL").unwrap_or_else(|_| NOTIFY_INFLUX_URL.to_string()),
             influx_db: std::env::var("AGENT_NOTIFY_INFLUX_DB").unwrap_or_else(|_| NOTIFY_INFLUX_DB.to_string()),
             influx_user: std::env::var("AGENT_NOTIFY_INFLUX_USER").unwrap_or_else(|_| NOTIFY_INFLUX_USER.to_string()),
@@ -121,22 +123,22 @@ impl<'a> Notifier<'a> {
     }
 
     pub async fn notify_task_start(&self) -> Result<()> {
-        self.notify("task_start").await
+        self.notify("task:start").await
     }
 
     pub async fn notify_task_finish(&mut self, status_code: u64, output: String) -> Result<()> {
         self.params.insert("status_code", status_code.to_string());
         self.params.insert("output", output);
-        self.notify("task_finish").await
+        self.notify("task:finish").await
     }
 
     pub async fn notify_task_skip(&self) -> Result<()> {
-        self.notify("task_skip").await
+        self.notify("task:skip").await
     }
 
     pub async fn notify_task_error<E: Into<String>>(&mut self, error: E) -> Result<()> {
         self.params.insert("error", error.into());
-        self.notify("task_error").await
+        self.notify("task:error").await
     }
 
     #[tracing::instrument(skip_all)]
@@ -237,7 +239,7 @@ impl<'a> Notifier<'a> {
 
         let mut write_query = {
             let q = Timestamp::from(Utc::now())
-                .into_query("events")
+                .into_query(NOTIFY_INFLUX_TABLE)
                 .add_tag("event", event.into())
                 .add_field("host_os", self.opts.host_os.to_string())
                 .add_field("cluster", self.opts.cluster.to_string())
@@ -246,7 +248,8 @@ impl<'a> Notifier<'a> {
                 .add_field("agent_version", env!("CARGO_PKG_VERSION"));
 
             if let Some(t) = self.task {
-                q.add_field("task_id", t.id).add_field("task_name", t.name.to_string())
+                q.add_field("task_id", t.id.to_string())
+                    .add_field("task_name", t.name.to_string())
             } else {
                 q
             }

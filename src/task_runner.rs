@@ -163,11 +163,7 @@ impl TaskRunner {
         self.ping().await?;
 
         if let Some(task) = self.queue.pop_front() {
-            let notifier_opts = NotifierOpts::new()
-                .with_cluster(self.opts.cluster.clone())
-                .with_channel_id(self.opts.channel_id);
-            let mut notifier = Notifier::new(notifier_opts).with_task(&task);
-            // probably docker error
+            let mut notifier = self.notifier().with_task(&task);
             let mut internal_error: Option<Error> = None;
             let mut status_code: Option<u64> = None;
 
@@ -335,6 +331,13 @@ impl TaskRunner {
         cmd.push(format!("./playbooks/{}.yaml", task.name));
 
         cmd
+    }
+
+    fn notifier(&self) -> Notifier {
+        let notifier_opts = NotifierOpts::new()
+            .with_cluster(self.opts.cluster.clone())
+            .with_channel_id(self.opts.channel_id);
+        Notifier::new(notifier_opts)
     }
 
     /// Deduplicate the [queue]

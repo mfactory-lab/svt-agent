@@ -1,3 +1,5 @@
+use std::path::PathBuf;
+
 /// Messenger program
 pub const MESSENGER_PROGRAM_ID: &str = "CgRaMXqqRHNT3Zo2uVZfX72TuxUgcLb8E3A8KrXnbXAC";
 
@@ -26,6 +28,8 @@ pub const AGENT_NAME: &str = "agent";
 /// The task monitor will be launched on this port
 pub const DEFAULT_MONITOR_PORT: &str = "8888";
 
+pub const DEFAULT_LOGS_PATH: Option<&str> = Some("/app/logs");
+
 /// Configuration files to be added to each task as `--extra-vars=@file`
 pub const TASK_CONFIG_FILES: &[&str] = &[
     "{home}/inventory/group_vars/all.yml",
@@ -42,3 +46,4 @@ pub const NOTIFY_INFLUX_URL: &str = "http://influx.thevalidators.io:8086";
 pub const NOTIFY_INFLUX_DB: &str = "svt_agent";
 pub const NOTIFY_INFLUX_USER: &str = "v_user";
 pub const NOTIFY_INFLUX_PASS: &str = "thepassword";
+pub const NOTIFY_INFLUX_TABLE: &str = "events";
