@@ -16,17 +16,16 @@ RUN cargo chef prepare --recipe-path recipe.json
 FROM chef AS cacher
 COPY --from=planner /app/recipe.json recipe.json
 # Build dependencies - this is the caching Docker layer!
-RUN --mount=type=cache,target=/usr/local/cargo/registry,id=svt-agent-registry \
-    --mount=type=cache,target=/app/target,id=svt-agent-deps \
-    cargo chef cook --release --recipe-path recipe.json && \
-    ls -la ./target/release
+RUN --mount=type=cache,target=/usr/local/cargo/registry \
+    --mount=type=cache,target=/app/target \
+    cargo chef cook --release --recipe-path recipe.json
 
 FROM chef AS builder
 COPY Cargo.* .
 COPY src ./src
 COPY --from=cacher $CARGO_HOME $CARGO_HOME
 COPY --from=cacher /app/target target
-RUN --mount=type=cache,target=/usr/local/cargo/registry,id=svt-agent-registry \
+RUN --mount=type=cache,target=/usr/local/cargo/registry \
     cargo build --release
 
 # FROM scratch
