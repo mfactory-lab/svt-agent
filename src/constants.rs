@@ -28,8 +28,6 @@ pub const AGENT_NAME: &str = "agent";
 /// The task monitor will be launched on this port
 pub const DEFAULT_MONITOR_PORT: &str = "8888";
 
-pub const DEFAULT_LOGS_PATH: Option<&str> = Some("/app/logs");
-
 /// Configuration files to be added to each task as `--extra-vars=@file`
 pub const TASK_CONFIG_FILES: &[&str] = &[
     "{home}/inventory/group_vars/all.yml",

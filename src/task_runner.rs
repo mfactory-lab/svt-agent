@@ -71,10 +71,10 @@ pub struct TaskRunnerOpts {
     pub cluster: Cluster,
 }
 
-impl TaskRunnerOpts {
-    pub fn new(args: &AgentArgs) -> Self {
-        let working_dir = if let Some(working_dir) = &args.working_dir {
-            working_dir.into()
+impl From<&AgentArgs> for TaskRunnerOpts {
+    fn from(args: &AgentArgs) -> Self {
+        let working_dir = if let Some(path) = &args.working_dir {
+            PathBuf::from(path)
         } else {
             PathBuf::from(DEFAULT_WORKING_DIR)
         };
@@ -269,7 +269,10 @@ impl TaskRunner {
             .network_mode("host")
             // .volumes_from(vec![CONTAINER_NAME])
             // `/ansible-custom` will be copied to the `/ansible`
-            .volumes(vec!["/app/ansible:/ansible-custom"])
+            .volumes(vec![&format!(
+                "{}/ansible:/ansible-custom",
+                self.opts.working_dir.to_str().unwrap()
+            )])
             .cmd(cmd.iter().map(|c| c.as_str()).collect())
             .env(["ANSIBLE_HOST_KEY_CHECKING=False"])
             .build();
@@ -336,7 +339,9 @@ impl TaskRunner {
     fn notifier(&self) -> Notifier {
         let notifier_opts = NotifierOpts::new()
             .with_cluster(self.opts.cluster.clone())
-            .with_channel_id(self.opts.channel_id);
+            .with_channel_id(self.opts.channel_id)
+            .with_logs_path(self.opts.working_dir.join("logs"));
+
         Notifier::new(notifier_opts)
     }
 
@@ -414,7 +419,7 @@ mod tests {
     use tracing_test::traced_test;
 
     fn get_task_runner() -> TaskRunner {
-        TaskRunner::new(TaskRunnerOpts::new(&AgentArgs {
+        TaskRunner::new(TaskRunnerOpts::from(&AgentArgs {
             keypair: Default::default(),
             cluster: Default::default(),
             channel_id: Default::default(),
@@ -497,5 +502,12 @@ mod tests {
 
         let res = runner.run().await;
         println!("{:?}", res);
+    }
+
+    #[test]
+    fn test_notifier() {
+        let mut runner = get_task_runner();
+        let n = runner.notifier();
+        assert_eq!(n.opts.logs_path, Some(PathBuf::from("/app/logs")));
     }
 }

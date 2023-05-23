@@ -33,7 +33,7 @@ impl Agent {
     #[tracing::instrument]
     pub fn new(args: &AgentArgs) -> Result<Self> {
         let keypair = read_keypair_file(&args.keypair).expect("Authority keypair file not found");
-        let runner = TaskRunner::new(TaskRunnerOpts::new(args));
+        let runner = TaskRunner::new(TaskRunnerOpts::from(args));
         let client = MessengerClient::new(args.cluster.clone(), args.program_id, keypair);
 
         Ok(Self {
@@ -168,8 +168,9 @@ impl Agent {
                                         warn!("Cannot add a task #{}, probably skipped...", new_task.id);
                                     }
                                 }
-                                Err(_) => {
+                                Err(e) => {
                                     warn!("Failed to convert message to task");
+                                    warn!("{}", e);
                                 }
                             }
                         }
@@ -190,8 +191,9 @@ impl Agent {
                                                 }
                                             }
                                         }
-                                        Err(_) => {
+                                        Err(e) => {
                                             warn!("Failed to convert message to task");
+                                            warn!("{}", e);
                                         }
                                     }
                                 },
@@ -416,8 +418,9 @@ impl AgentContext {
                             tasks.push(task);
                         }
                     }
-                    Err(_) => {
+                    Err(e) => {
                         warn!("Failed to convert message to task... Message#{}", msg_id);
+                        warn!("{}", e);
                     }
                 }
             }

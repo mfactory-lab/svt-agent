@@ -36,8 +36,6 @@ impl NotifierOpts {
     pub fn new() -> Self {
         Self {
             host_os: std::env::var("DOCKER_HOST_OS").unwrap_or_default(),
-            logs_path: std::env::var("AGENT_LOGS_PATH")
-                .map_or(DEFAULT_LOGS_PATH.map(PathBuf::from), |p| Some(PathBuf::from(p))),
             influx_url: std::env::var("AGENT_NOTIFY_INFLUX_URL").unwrap_or_else(|_| NOTIFY_INFLUX_URL.to_string()),
             influx_db: std::env::var("AGENT_NOTIFY_INFLUX_DB").unwrap_or_else(|_| NOTIFY_INFLUX_DB.to_string()),
             influx_user: std::env::var("AGENT_NOTIFY_INFLUX_USER").unwrap_or_else(|_| NOTIFY_INFLUX_USER.to_string()),
@@ -93,7 +91,7 @@ impl NotifierOpts {
 
 pub struct Notifier<'a> {
     /// Notifier options
-    opts: NotifierOpts,
+    pub(crate) opts: NotifierOpts,
     /// Parameters to be sent
     params: HashMap<&'a str, String>,
     /// The [Task] which will be notified
@@ -154,11 +152,11 @@ impl<'a> Notifier<'a> {
         );
 
         if let Err(e) = save_result {
-            warn!("[File] {}", e);
+            warn!("{}", e);
         }
 
         if let Err(e) = influx_result {
-            warn!("[Influx] {}", e);
+            warn!("{}", e);
         }
 
         webhook_result?;
@@ -170,6 +168,13 @@ impl<'a> Notifier<'a> {
     #[tracing::instrument(skip_all)]
     async fn save_to_file(&self) -> Result<()> {
         if let Some(path) = &self.opts.logs_path {
+            if !path.is_dir() {
+                return Err(Error::msg(format!(
+                    "Invalid logs path `{}`.",
+                    path.to_str().unwrap_or_default()
+                )));
+            }
+
             if let Some(data) = self.params.get("output").or_else(|| self.params.get("error")) {
                 let file_name = format!(
                     "{}_{}.log",
