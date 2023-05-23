@@ -1,46 +1,38 @@
 # syntax=docker/dockerfile:1.4
+# https://github.com/LukeMathWalker/cargo-chef
 
 ARG APP_NAME=svt-agent
 ARG RUST_LOG=info
 ARG RUST_BACKTRACE=0
 
-##########################
-## Build layer
-##########################
-
-FROM rust:slim as builder
-
-## This is important, see https://github.com/rust-lang/docker-rust/issues/85
-#ENV RUSTFLAGS="-C target-feature=-crt-static"
-#
-## if needed, add additional dependencies here
-#RUN apk add --no-cache build-base openssl-dev
-
-RUN apt update && apt install -y --no-install-recommends libopus-dev libssl-dev pkg-config
-
+FROM lukemathwalker/cargo-chef:latest-rust-1 AS chef
 WORKDIR /app
 
+FROM chef AS planner
 COPY Cargo.* .
 COPY src ./src
+RUN cargo chef prepare --recipe-path recipe.json
 
-RUN \
-  --mount=type=cache,target=/usr/local/cargo/registry \
-  --mount=type=cache,target=/app/target \
-  cargo install --root /app --path .
+FROM chef AS cacher
+COPY --from=planner /app/recipe.json recipe.json
+# Build dependencies - this is the caching Docker layer!
+RUN --mount=type=cache,target=/usr/local/cargo/registry,id=svt-agent-registry \
+    --mount=type=cache,target=/app/target,id=svt-agent-deps \
+    cargo chef cook --release --recipe-path recipe.json && \
+    ls -la ./target/release
 
-# do a release build
-#RUN cargo build --release
-#RUN strip target/release/${APP_NAME}
+FROM chef AS builder
+COPY Cargo.* .
+COPY src ./src
+COPY --from=cacher $CARGO_HOME $CARGO_HOME
+COPY --from=cacher /app/target target
+RUN --mount=type=cache,target=/usr/local/cargo/registry,id=svt-agent-registry \
+    cargo build --release
 
-# RUN cargo install --root /app --target=x86_64-unknown-linux-musl --path .
-# RUN cargo install --root /app --path .
-
-#######################
-# Final image
-#######################
-
-FROM debian:bullseye-slim as final
-#FROM alpine:3.18 as final
+# FROM scratch
+# FROM gcr.io/distroless/cc
+# FROM gcr.io/distroless/cc-debian1
+FROM debian:buster-slim AS final
 
 WORKDIR /app
 
@@ -50,8 +42,7 @@ ENV RUST_LOG=${RUST_LOG}
 ARG RUST_BACKTRACE
 ENV RUST_BACKTRACE=${RUST_BACKTRACE}
 
-COPY --from=builder /app/bin/${APP_NAME} /
+COPY --from=builder /app/target/release/${APP_NAME} /
 COPY ./ansible/ ./ansible
 
-#ENTRYPOINT ["/tini", "--"]
 ENTRYPOINT [ "/svt-agent" ]
