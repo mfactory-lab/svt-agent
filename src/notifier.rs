@@ -91,7 +91,7 @@ impl NotifierOpts {
 
 pub struct Notifier<'a> {
     /// Notifier options
-    opts: &'a NotifierOpts,
+    opts: NotifierOpts,
     /// Parameters to be sent
     params: HashMap<&'a str, String>,
     /// The [Task] which will be notified
@@ -99,7 +99,7 @@ pub struct Notifier<'a> {
 }
 
 impl<'a> Notifier<'a> {
-    pub fn new(opts: &'a NotifierOpts) -> Self {
+    pub fn new(opts: NotifierOpts) -> Self {
         Self {
             opts,
             task: None,
@@ -116,15 +116,27 @@ impl<'a> Notifier<'a> {
         self.notify("start").await
     }
 
-    pub async fn notify_finish(&mut self, status_code: u64, output: String) -> Result<()> {
-        self.params.insert("status_code", status_code.to_string());
-        self.params.insert("output", output);
-        self.notify("finish").await
+    pub async fn notify_authorize(&self) -> Result<()> {
+        self.notify("authorize").await
     }
 
-    pub async fn notify_error<E: Into<String>>(&mut self, error: E) -> Result<()> {
+    pub async fn notify_task_start(&self) -> Result<()> {
+        self.notify("task:start").await
+    }
+
+    pub async fn notify_task_finish(&mut self, status_code: u64, output: String) -> Result<()> {
+        self.params.insert("status_code", status_code.to_string());
+        self.params.insert("output", output);
+        self.notify("task:finish").await
+    }
+
+    pub async fn notify_task_skip(&self) -> Result<()> {
+        self.notify("task:skip").await
+    }
+
+    pub async fn notify_task_error<E: Into<String>>(&mut self, error: E) -> Result<()> {
         self.params.insert("error", error.into());
-        self.notify("error").await
+        self.notify("task:error").await
     }
 
     #[tracing::instrument(skip_all)]
@@ -225,7 +237,7 @@ impl<'a> Notifier<'a> {
 
         let mut write_query = {
             let q = Timestamp::from(Utc::now())
-                .into_query("task_logs")
+                .into_query("events")
                 .add_tag("event", event.into())
                 .add_field("host_os", self.opts.host_os.to_string())
                 .add_field("cluster", self.opts.cluster.to_string())

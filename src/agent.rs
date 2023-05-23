@@ -184,7 +184,7 @@ impl Agent {
                                                 info!("Task #{} was skipped...", new_task.id);
                                                 if task.id == new_task.id {
                                                     runner.reset_state().await;
-                                                    if ctx.notify_event("skip", Some(&task)).await.is_err() {
+                                                    if ctx.notifier().with_task(&task).notify_task_skip().await.is_err() {
                                                         info!("Failed to send skip notify...");
                                                     }
                                                 }
@@ -330,14 +330,16 @@ impl AgentContext {
             self.runner.lock().await.init().await?;
         }
 
-        if self.notify_event("start", None).await.is_err() {
+        let notifier = self.notifier();
+
+        if notifier.notify_start().await.is_err() {
             info!("Failed to send `start` notify...");
         }
 
         loop {
             match self.authorize().await {
                 Ok(_) => {
-                    if self.notify_event("authorize", None).await.is_err() {
+                    if notifier.notify_authorize().await.is_err() {
                         info!("Failed to send `authorize` notify...");
                     }
                     break;
@@ -441,7 +443,7 @@ impl AgentContext {
         Ok(())
     }
 
-    async fn notify_event(&self, event: &str, task: Option<&Task>) -> Result<()> {
+    fn notifier(&self) -> Notifier {
         let agent_id = self.client.authority_pubkey();
         let cluster = self.client.cluster.clone();
         let opts = NotifierOpts::new()
@@ -449,16 +451,7 @@ impl AgentContext {
             .with_cluster(cluster)
             .with_channel_id(self.channel_id);
 
-        {
-            let n = Notifier::new(&opts);
-            if let Some(t) = task {
-                n.with_task(t)
-            } else {
-                n
-            }
-        }
-        .notify(event)
-        .await
+        Notifier::new(opts)
     }
 }
 
