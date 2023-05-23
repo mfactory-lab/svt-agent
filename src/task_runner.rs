@@ -154,7 +154,9 @@ impl TaskRunner {
     }
 
     /// Pull docker [image] and show result info
-    async fn pull_image(&self, image: impl Into<String>) -> Result<()> {
+    async fn pull_image(&self, image: &str) -> Result<()> {
+        info!("Pulling image `{}`...", image);
+
         let mut stream = self
             .docker
             .images()
@@ -290,7 +292,7 @@ impl TaskRunner {
             .delete()
             .await
         {
-            error!("Error: Failed to delete container. {}", e)
+            // error!("Error: Failed to delete container. {}", e)
         }
 
         // pull ansible image if needed
@@ -304,7 +306,7 @@ impl TaskRunner {
             .network_mode("host")
             // .volumes_from(vec![CONTAINER_NAME])
             // `/ansible-custom` will be copied to the `/ansible`
-            .volumes(vec!["/app/ansible", "/ansible-custom"])
+            .volumes(vec!["/app/ansible:/ansible-custom"])
             .cmd(cmd.iter().map(|c| c.as_str()).collect())
             .env(["ANSIBLE_HOST_KEY_CHECKING=False"])
             .build();
