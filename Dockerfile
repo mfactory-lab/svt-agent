@@ -24,13 +24,12 @@ COPY Cargo.* .
 COPY src ./src
 COPY --from=cacher /app/target target
 COPY --from=cacher $CARGO_HOME $CARGO_HOME
-RUN --mount=type=cache,target=/usr/local/cargo/registry \
-    cargo build --release
+RUN cargo build --release
 
 # FROM scratch
 # FROM gcr.io/distroless/cc
 # FROM gcr.io/distroless/cc-debian1
-FROM debian:buster-slim AS final
+FROM gcr.io/distroless/cc AS final
 
 WORKDIR /app
 
