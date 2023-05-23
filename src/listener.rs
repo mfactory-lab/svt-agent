@@ -1,11 +1,7 @@
 use crate::messenger::NewMessageEvent;
-use anchor_client::solana_client::nonblocking::pubsub_client::{
-    PubsubClient, PubsubClientError, PubsubClientResult,
-};
+use anchor_client::solana_client::nonblocking::pubsub_client::{PubsubClient, PubsubClientError, PubsubClientResult};
 use anchor_client::solana_client::rpc_client::RpcClient;
-use anchor_client::solana_client::rpc_config::{
-    RpcTransactionLogsConfig, RpcTransactionLogsFilter,
-};
+use anchor_client::solana_client::rpc_config::{RpcTransactionLogsConfig, RpcTransactionLogsFilter};
 use anchor_client::solana_client::rpc_response::{Response, RpcLogsResponse};
 use anchor_client::solana_sdk::commitment_config::CommitmentConfig;
 use anchor_client::solana_sdk::pubkey::Pubkey;
@@ -34,11 +30,7 @@ pub struct Listener<'a> {
 }
 
 impl<'a> Listener<'a> {
-    pub fn new(
-        program_id: &Pubkey,
-        client: &'a PubsubClient,
-        filter: &'a RpcTransactionLogsFilter,
-    ) -> Self {
+    pub fn new(program_id: &Pubkey, client: &'a PubsubClient, filter: &'a RpcTransactionLogsFilter) -> Self {
         Self {
             program_id: *program_id,
             config: RpcTransactionLogsConfig {
@@ -49,13 +41,8 @@ impl<'a> Listener<'a> {
         }
     }
 
-    pub async fn logs_subscribe(
-        &self,
-        timeout: Duration,
-    ) -> SubscribeResult<Response<RpcLogsResponse>> {
-        let task = self
-            .client
-            .logs_subscribe(self.filter.clone(), self.config.clone());
+    pub async fn logs_subscribe(&self, timeout: Duration) -> SubscribeResult<Response<RpcLogsResponse>> {
+        let task = self.client.logs_subscribe(self.filter.clone(), self.config.clone());
 
         tokio::select! {
             res = task => {
@@ -119,10 +106,7 @@ fn handle_program_log<T: anchor_lang::Event + anchor_lang::AnchorDeserialize>(
     l: &str,
 ) -> Result<(Option<T>, Option<String>, bool), ClientError> {
     // Log emitted from the current program.
-    if let Some(log) = l
-        .strip_prefix(PROGRAM_LOG)
-        .or_else(|| l.strip_prefix(PROGRAM_DATA))
-    {
+    if let Some(log) = l.strip_prefix(PROGRAM_LOG).or_else(|| l.strip_prefix(PROGRAM_DATA)) {
         let borsh_bytes = match anchor_lang::__private::base64::decode(log) {
             Ok(borsh_bytes) => borsh_bytes,
             _ => {
@@ -187,9 +171,7 @@ impl Execution {
             .ok_or_else(|| ClientError::LogParseError(l.to_string()))?
             .as_str()
             .to_string();
-        Ok(Self {
-            stack: vec![program],
-        })
+        Ok(Self { stack: vec![program] })
     }
 
     pub fn program(&self) -> String {

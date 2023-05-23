@@ -49,10 +49,7 @@ impl Agent {
 
     fn print_info(&self) {
         info!("Agent Version: {}", env!("CARGO_PKG_VERSION"));
-        info!(
-            "Agent ID: {:?}",
-            self.ctx.client.authority_pubkey().to_string()
-        );
+        info!("Agent ID: {:?}", self.ctx.client.authority_pubkey().to_string());
         info!("Cluster: {}", self.ctx.client.cluster);
         info!("Program ID: {:?}", self.ctx.client.program_id);
         info!("Channel ID: {:?}", self.ctx.channel_id);
@@ -103,10 +100,7 @@ impl Agent {
                     match runner.current_state().await {
                         RunState::Processing(task) | RunState::Error(task) => {
                             // println!("... {:#?}", task);
-                            info!(
-                                "Previous Task #{} was failed, waiting for manual action...",
-                                task.id
-                            );
+                            info!("Previous Task #{} was failed, waiting for manual action...", task.id);
                             time::sleep(Duration::from_millis(WAIT_ACTION_INTERVAL)).await;
                         }
                         // previous task was complete, try to confirm it
@@ -253,8 +247,7 @@ impl Agent {
                             info!("Loading tasks...");
                             ctx.load_tasks().await;
 
-                            let listener =
-                                Listener::new(&ctx.client.program_id, &pub_sub_client, &filter);
+                            let listener = Listener::new(&ctx.client.program_id, &pub_sub_client, &filter);
 
                             let logs_subscribe = listener
                                 .logs_subscribe(Duration::from_secs(LOGS_SUBSCRIBE_TIMEOUT))
@@ -265,7 +258,9 @@ impl Agent {
                                 Ok((mut stream, _unsubscribe)) => {
                                     while let Some(log) = stream.next().await {
                                         // skip simulation
-                                        if log.value.signature == "1111111111111111111111111111111111111111111111111111111111111111" {
+                                        if log.value.signature
+                                            == "1111111111111111111111111111111111111111111111111111111111111111"
+                                        {
                                             info!("Probably simulation, skip...");
                                             continue;
                                         }
@@ -274,28 +269,19 @@ impl Agent {
                                             .on::<NewMessageEvent>(&log, &|evt| {
                                                 info!("{:?}", evt);
                                                 if let Err(e) = new_msg_sender.send(evt) {
-                                                    warn!(
-                                                        "[NewMessageEvent] Failed to send... {}",
-                                                        e
-                                                    );
+                                                    warn!("[NewMessageEvent] Failed to send... {}", e);
                                                 }
                                             })
                                             .on::<DeleteMessageEvent>(&log, &|evt| {
                                                 info!("{:?}", evt);
                                                 if let Err(e) = delete_msg_sender.send(evt) {
-                                                    warn!(
-                                                        "[DeleteMessageEvent] Failed to send... {}",
-                                                        e
-                                                    );
+                                                    warn!("[DeleteMessageEvent] Failed to send... {}", e);
                                                 }
                                             })
                                             .on::<UpdateMessageEvent>(&log, &|evt| {
                                                 info!("{:?}", evt);
                                                 if let Err(e) = update_msg_sender.send(evt) {
-                                                    warn!(
-                                                        "[UpdateMessageEvent] Failed to send... {}",
-                                                        e
-                                                    );
+                                                    warn!("[UpdateMessageEvent] Failed to send... {}", e);
                                                 }
                                             });
                                     }

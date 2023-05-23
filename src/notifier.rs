@@ -36,12 +36,9 @@ impl NotifierOpts {
     pub fn new() -> Self {
         Self {
             host_os: std::env::var("DOCKER_HOST_OS").unwrap_or_default(),
-            influx_url: std::env::var("AGENT_NOTIFY_INFLUX_URL")
-                .unwrap_or_else(|_| NOTIFY_INFLUX_URL.to_string()),
-            influx_db: std::env::var("AGENT_NOTIFY_INFLUX_DB")
-                .unwrap_or_else(|_| NOTIFY_INFLUX_DB.to_string()),
-            influx_user: std::env::var("AGENT_NOTIFY_INFLUX_USER")
-                .unwrap_or_else(|_| NOTIFY_INFLUX_USER.to_string()),
+            influx_url: std::env::var("AGENT_NOTIFY_INFLUX_URL").unwrap_or_else(|_| NOTIFY_INFLUX_URL.to_string()),
+            influx_db: std::env::var("AGENT_NOTIFY_INFLUX_DB").unwrap_or_else(|_| NOTIFY_INFLUX_DB.to_string()),
+            influx_user: std::env::var("AGENT_NOTIFY_INFLUX_USER").unwrap_or_else(|_| NOTIFY_INFLUX_USER.to_string()),
             influx_pass: std::env::var("AGENT_NOTIFY_INFLUX_PASSWORD")
                 .unwrap_or_else(|_| NOTIFY_INFLUX_PASS.to_string()),
             influx_max_attempts: 5,
@@ -159,11 +156,7 @@ impl<'a> Notifier<'a> {
     #[tracing::instrument(skip_all)]
     async fn save_to_file(&self) -> Result<()> {
         if let Some(path) = &self.opts.logs_path {
-            if let Some(data) = self
-                .params
-                .get("output")
-                .or_else(|| self.params.get("error"))
-            {
+            if let Some(data) = self.params.get("output").or_else(|| self.params.get("error")) {
                 let file_name = format!(
                     "{}_{}.log",
                     self.task.map_or(0, |t| t.id),
@@ -172,23 +165,14 @@ impl<'a> Notifier<'a> {
 
                 let path = path.join(&file_name);
 
-                match OpenOptions::new()
-                    .append(true)
-                    .create(true)
-                    .open(&path)
-                    .await
-                {
+                match OpenOptions::new().append(true).create(true).open(&path).await {
                     Ok(mut file) => {
                         if let Err(e) = file.write_all(data.as_bytes()).await {
                             error!("Unable to write log data. {}", e);
                         }
                     }
                     Err(e) => {
-                        error!(
-                            "Unable to open log file ({}). {}",
-                            path.to_str().unwrap_or("?"),
-                            e
-                        );
+                        error!("Unable to open log file ({}). {}", path.to_str().unwrap_or("?"), e);
                     }
                 }
             }
@@ -250,8 +234,7 @@ impl<'a> Notifier<'a> {
                 .add_field("agent_version", env!("CARGO_PKG_VERSION"));
 
             if let Some(t) = self.task {
-                q.add_field("task_id", t.id)
-                    .add_field("task_name", t.name.to_string())
+                q.add_field("task_id", t.id).add_field("task_name", t.name.to_string())
             } else {
                 q
             }

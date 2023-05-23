@@ -1,6 +1,5 @@
 use crate::constants::{
-    ANSIBLE_DEFAULT_TAG, ANSIBLE_IMAGE, CONTAINER_NAME, TASK_CONFIG_FILES, TASK_VERSION_ARG,
-    TASK_WORKING_DIR,
+    ANSIBLE_DEFAULT_TAG, ANSIBLE_IMAGE, CONTAINER_NAME, TASK_CONFIG_FILES, TASK_VERSION_ARG, TASK_WORKING_DIR,
 };
 use crate::monitor::{TaskMonitor, TaskMonitorOptions};
 use crate::notifier::{Notifier, NotifierOpts};
@@ -20,8 +19,7 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 use tokio::sync::{Mutex, MutexGuard};
 use tokio::time;
-use tracing::{debug, info};
-use tracing::{error, warn};
+use tracing::{debug, error, info, warn};
 
 /// Prevent starting the monitoring when commands executes immediately
 const MONITOR_START_TIMEOUT_MS: u64 = 2000;
@@ -157,10 +155,7 @@ impl TaskRunner {
     async fn pull_image(&self, image: &str) -> Result<()> {
         info!("Pulling image `{}`...", image);
 
-        let mut stream = self
-            .docker
-            .images()
-            .pull(&PullOptions::builder().image(image).build());
+        let mut stream = self.docker.images().pull(&PullOptions::builder().image(image).build());
 
         while let Some(pull_result) = stream.next().await {
             match pull_result {
@@ -197,9 +192,7 @@ impl TaskRunner {
             match self.run_task(&task).await {
                 Ok(container) => {
                     let _ = notifier.notify_start().await;
-                    self.set_state(RunState::Processing(task.clone()))
-                        .await
-                        .ok();
+                    self.set_state(RunState::Processing(task.clone())).await.ok();
 
                     let monitor_opts = TaskMonitorOptions::new()
                         .filter(self.opts.container_name.as_ref())
@@ -208,8 +201,7 @@ impl TaskRunner {
 
                     let mut monitor = TaskMonitor::new(&monitor_opts, &self.docker);
 
-                    let monitor_start_timeout =
-                        time::sleep(Duration::from_millis(self.opts.monitor_start_timeout_ms));
+                    let monitor_start_timeout = time::sleep(Duration::from_millis(self.opts.monitor_start_timeout_ms));
                     tokio::pin!(monitor_start_timeout);
 
                     loop {
@@ -238,8 +230,7 @@ impl TaskRunner {
                     if let Some(status_code) = status_code {
                         if status_code == 0 {
                             self.set_state(RunState::Complete(task.clone())).await.ok();
-                            let output =
-                                get_container_logs(&container, ContainerLogFlags::StdOut).await;
+                            let output = get_container_logs(&container, ContainerLogFlags::StdOut).await;
                             let _ = notifier.notify_finish(status_code, output).await;
                         } else {
                             self.set_state(RunState::Error(task.clone())).await.ok();
@@ -285,13 +276,7 @@ impl TaskRunner {
     #[tracing::instrument(skip_all)]
     async fn run_task(&self, task: &Task) -> Result<Container> {
         // Delete if exists
-        if let Err(e) = self
-            .docker
-            .containers()
-            .get(&self.opts.container_name)
-            .delete()
-            .await
-        {
+        if let Err(e) = self.docker.containers().get(&self.opts.container_name).delete().await {
             // error!("Error: Failed to delete container. {}", e)
         }
 
