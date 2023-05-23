@@ -386,7 +386,7 @@ impl AgentContext {
         let cek = self.cek.lock().await;
         let id_from = *self.last_task_id.lock().await;
 
-        info!("Prepare tasks... (id_from: {})", id_from);
+        info!("Prepare tasks... [last_task_id: {}]", id_from);
 
         let mut tasks = vec![];
         let mut need_reset = false;

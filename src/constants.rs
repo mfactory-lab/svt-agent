@@ -1,9 +1,9 @@
 /// Messenger program
 pub const MESSENGER_PROGRAM_ID: &str = "CgRaMXqqRHNT3Zo2uVZfX72TuxUgcLb8E3A8KrXnbXAC";
 
-pub const DEFAULT_CLUSTER: &str = "devnet";
+pub const DEFAULT_CLUSTER: &str = "testnet";
 
-pub const DEFAULT_CHANNEL_ID: &str = "Bk1EAvKminEwHjyVhG2QA7sQeU1W3zPnFE6rTnLWDKYJ";
+pub const DEFAULT_CHANNEL_ID: &str = "DA3Qz88yhRuMc8dcrytAnkJgaixm55B4EXoMjAFLeQny";
 
 pub const WAIT_COMMAND_INTERVAL: u64 = 5000;
 pub const WAIT_BALANCE_INTERVAL: u64 = 5000;

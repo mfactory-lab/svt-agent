@@ -1,4 +1,5 @@
 use crate::constants::CONTAINER_NAME;
+use crate::utils::pull_image;
 use anyhow::Error;
 use anyhow::Result;
 use futures::StreamExt;
@@ -26,19 +27,7 @@ impl<'a, 'b> TaskMonitor<'a, 'b> {
 
     #[tracing::instrument(skip_all)]
     pub async fn init(docker: &Docker) -> Result<()> {
-        let mut stream = docker
-            .images()
-            .pull(&PullOptions::builder().image(MONITOR_IMAGE).build());
-
-        while let Some(pull_result) = stream.next().await {
-            match pull_result {
-                Ok(output) => info!("{:?}", output),
-                Err(e) => {
-                    info!("Error: {}", e);
-                    return Err(Error::from(e));
-                }
-            }
-        }
+        pull_image(docker, MONITOR_IMAGE).await?;
 
         Ok(())
     }

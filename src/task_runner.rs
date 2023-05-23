@@ -3,6 +3,7 @@ use crate::constants::{
 };
 use crate::monitor::{TaskMonitor, TaskMonitorOptions};
 use crate::notifier::{Notifier, NotifierOpts};
+use crate::utils::{get_container_logs, pull_image, ContainerLogFlags};
 use crate::AgentArgs;
 use anchor_client::Cluster;
 use anchor_lang::prelude::*;
@@ -143,29 +144,10 @@ impl TaskRunner {
         self.load_state().await?;
 
         // pull ansible image if needed
-        // self.pull_image(ANSIBLE_IMAGE).await?;
+        // pull_image(ANSIBLE_IMAGE).await?;
 
         // setup monitoring
         TaskMonitor::init(&self.docker).await?;
-
-        Ok(())
-    }
-
-    /// Pull docker [image] and show result info
-    async fn pull_image(&self, image: &str) -> Result<()> {
-        info!("Pulling image `{}`...", image);
-
-        let mut stream = self.docker.images().pull(&PullOptions::builder().image(image).build());
-
-        while let Some(pull_result) = stream.next().await {
-            match pull_result {
-                Ok(output) => info!("{:?}", output),
-                Err(e) => {
-                    info!("Error: {:?}", e);
-                    return Err(Error::from(e));
-                }
-            }
-        }
 
         Ok(())
     }
@@ -281,7 +263,7 @@ impl TaskRunner {
         }
 
         // pull ansible image if needed
-        self.pull_image(&self.build_image_name(task)).await?;
+        pull_image(&self.docker, &self.build_image_name(task)).await?;
 
         let cmd = self.build_cmd(task);
 
@@ -420,52 +402,6 @@ impl TaskRunner {
         }
         Ok(())
     }
-}
-
-#[allow(non_snake_case, non_upper_case_globals)]
-mod ContainerLogFlags {
-    pub const StdOut: u8 = 0x01;
-    pub const StdErr: u8 = 0x02;
-    pub const All: u8 = 0xFF;
-}
-
-/// Try to get the [container] output
-#[tracing::instrument(skip(container))]
-async fn get_container_logs(container: &Container<'_>, mode: u8) -> String {
-    let mut res = String::new();
-
-    let mut logs_stream = container.logs(
-        &LogsOptions::builder()
-            .timestamps(true)
-            .stdout(true)
-            .stderr(true)
-            .build(),
-    );
-
-    while let Some(log_result) = logs_stream.next().await {
-        match log_result {
-            Ok(chunk) => match chunk {
-                TtyChunk::StdOut(bytes) => {
-                    if mode & ContainerLogFlags::StdOut == 1 {
-                        res.push_str(std::str::from_utf8(&bytes).unwrap());
-                    }
-
-                    info!("StdOut: {}", std::str::from_utf8(&bytes).unwrap());
-                }
-                TtyChunk::StdErr(bytes) => {
-                    if mode & ContainerLogFlags::StdErr == 2 {
-                        res.push_str(std::str::from_utf8(&bytes).unwrap());
-                    }
-
-                    info!("StdErr: {}", std::str::from_utf8(&bytes).unwrap());
-                }
-                _ => {}
-            },
-            Err(e) => error!("Failed to get container logs: {}", e),
-        }
-    }
-
-    res
 }
 
 #[cfg(test)]

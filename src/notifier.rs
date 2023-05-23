@@ -121,22 +121,22 @@ impl<'a> Notifier<'a> {
     }
 
     pub async fn notify_task_start(&self) -> Result<()> {
-        self.notify("task:start").await
+        self.notify("task_start").await
     }
 
     pub async fn notify_task_finish(&mut self, status_code: u64, output: String) -> Result<()> {
         self.params.insert("status_code", status_code.to_string());
         self.params.insert("output", output);
-        self.notify("task:finish").await
+        self.notify("task_finish").await
     }
 
     pub async fn notify_task_skip(&self) -> Result<()> {
-        self.notify("task:skip").await
+        self.notify("task_skip").await
     }
 
     pub async fn notify_task_error<E: Into<String>>(&mut self, error: E) -> Result<()> {
         self.params.insert("error", error.into());
-        self.notify("task:error").await
+        self.notify("task_error").await
     }
 
     #[tracing::instrument(skip_all)]
