@@ -179,7 +179,7 @@ is_valid_os() {
   if [[ "$OS" =~ ^(Ubuntu|Debian)$ ]]; then
     say "OS: $OS ($VER)"
   else
-    err "Unsupported operating system \"$OS\". Only Ubuntu and Debian distributions are supported."
+    err "Unsupported operating system \"$OS\". Only Ubuntu and Debian distributions are supported for now."
   fi
 }
 
