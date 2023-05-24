@@ -111,6 +111,11 @@ generate_sshkey() {
     mkdir -p $SSHKEY_PATH
     ssh-keygen -t rsa -b 4096 -f "$SSHKEY_PATH/$@" -q -N '' -C 'svt-agent'
     chmod 600 "$SSHKEY_PATH/$@"
+
+    # prepare authorized_keys
+    [[ ! -d ~/.ssh ]] && mkdir -p ~/.ssh && chmod 700 ~/.ssh
+    [[ ! -f ~/.ssh/authorized_keys ]] && touch ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys
+
     # check trailing newline
     x=$(tail -c 1 ~/.ssh/authorized_keys)
     if [ "$x" != "" ]
