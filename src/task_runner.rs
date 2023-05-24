@@ -267,8 +267,7 @@ impl TaskRunner {
             .name(&self.opts.container_name)
             .working_dir(TASK_WORKING_DIR)
             .network_mode("host")
-            // .volumes_from(vec![CONTAINER_NAME])
-            .volumes(vec![&format!("{}-ansible:/ansible-custom", CONTAINER_NAME)])
+            .volumes_from(vec![CONTAINER_NAME])
             .cmd(cmd.iter().map(|c| c.as_str()).collect())
             .env(["ANSIBLE_HOST_KEY_CHECKING=False"])
             .build();

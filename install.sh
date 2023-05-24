@@ -121,31 +121,6 @@ generate_sshkey() {
   fi
 }
 
-is_valid_cluster() {
-  if [[ "$@" =~ ^(mainnet-beta|devnet|testnet)$ ]]; then
-    say "Cluster: $@"
-  else
-    err "Invalid cluster \"$@\""
-  fi
-}
-
-is_valid_os() {
-  read -r OS VER < <(detect_os)
-  if [[ "$OS" =~ ^(Ubuntu|Debian)$ ]]; then
-    say "OS: $OS ($VER)"
-  else
-    err "Unsupported operating system \"$OS\". Only Ubuntu and Debian distributions are supported."
-  fi
-}
-
-check_cmd() {
-  command -v "$1" >/dev/null 2>&1
-}
-
-say() {
-  printf 'svt-agent: %s\n' "$1"
-}
-
 # Retrieves the operating system information.
 # This function checks various methods to determine the OS and its version,
 # including checking the /etc/os-release file, using the lsb_release command,
@@ -183,6 +158,31 @@ detect_os() {
     VER=$(uname -r)
   fi
   echo "$OS" "$VER"
+}
+
+is_valid_cluster() {
+  if [[ "$@" =~ ^(mainnet-beta|devnet|testnet)$ ]]; then
+    say "Cluster: $@"
+  else
+    err "Invalid cluster \"$@\""
+  fi
+}
+
+is_valid_os() {
+  read -r OS VER < <(detect_os)
+  if [[ "$OS" =~ ^(Ubuntu|Debian)$ ]]; then
+    say "OS: $OS ($VER)"
+  else
+    err "Unsupported operating system \"$OS\". Only Ubuntu and Debian distributions are supported."
+  fi
+}
+
+check_cmd() {
+  command -v "$1" >/dev/null 2>&1
+}
+
+say() {
+  printf 'svt-agent: %s\n' "$1"
 }
 
 err() {
