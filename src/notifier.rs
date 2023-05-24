@@ -23,7 +23,6 @@ pub struct NotifierOpts {
     pub agent_id: Pubkey,
     pub cluster: Cluster,
     pub logs_path: Option<PathBuf>,
-    pub host_os: String,
     pub webhook_url: String,
     pub influx_url: String,
     pub influx_db: String,
@@ -35,7 +34,6 @@ pub struct NotifierOpts {
 impl NotifierOpts {
     pub fn new() -> Self {
         Self {
-            host_os: std::env::var("DOCKER_HOST_OS").unwrap_or_default(),
             influx_url: std::env::var("AGENT_NOTIFY_INFLUX_URL").unwrap_or_else(|_| NOTIFY_INFLUX_URL.to_string()),
             influx_db: std::env::var("AGENT_NOTIFY_INFLUX_DB").unwrap_or_else(|_| NOTIFY_INFLUX_DB.to_string()),
             influx_user: std::env::var("AGENT_NOTIFY_INFLUX_USER").unwrap_or_else(|_| NOTIFY_INFLUX_USER.to_string()),
@@ -70,11 +68,6 @@ impl NotifierOpts {
 
     pub fn with_cluster(mut self, cluster: Cluster) -> Self {
         self.cluster = cluster;
-        self
-    }
-
-    pub fn with_host_os<T: Into<String>>(mut self, host_os: T) -> Self {
-        self.host_os = host_os.into();
         self
     }
 
@@ -246,7 +239,6 @@ impl<'a> Notifier<'a> {
             let q = Timestamp::from(Utc::now())
                 .into_query(NOTIFY_INFLUX_TABLE)
                 .add_tag("event", event.into())
-                .add_field("host_os", self.opts.host_os.to_string())
                 .add_field("cluster", self.opts.cluster.to_string())
                 .add_field("channel_id", self.opts.channel_id.to_string())
                 .add_field("agent_id", self.opts.agent_id.to_string())

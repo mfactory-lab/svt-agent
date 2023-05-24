@@ -90,7 +90,6 @@ pub struct AgentArgs {
     pub monitor_port: u16,
 }
 
-// #[tokio::main(flavor = "current_thread")]
 #[tokio::main]
 async fn main() -> Result<()> {
     let cli = Cli::parse();
