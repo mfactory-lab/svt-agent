@@ -29,6 +29,7 @@ fi
 do_install() {
   echo "Installing SVT Agent..."
 
+  ensure is_valid_os
   # ensure is_valid_cluster $CLUSTER
   # TODO: validate channel_id
   # ensure is_valid_channel $CID
@@ -48,17 +49,13 @@ do_install() {
   mkdir -p $WORKING_DIR
   mkdir -p $WORKING_DIR/logs
 
-  #say "Setup firewall..."
-  #sudo ufw allow $EXPOSE_PORT/tcp
-  #say "Done"
-
   say "Downloading agent image (release: $AGENT_RELEASE)..."
   ensure docker pull $IMAGE_NAME:$AGENT_RELEASE
 
   say "Cleaning up..."
   docker stop $CONTAINER_NAME 2>/dev/null 1>/dev/null
   docker container rm -f -v $CONTAINER_NAME 2>/dev/null 1>/dev/null
-#  docker volume rm -f "$CONTAINER_NAME-ansible" 2>/dev/null 1>/dev/null
+  docker volume rm -f "$CONTAINER_NAME-ansible" 2>/dev/null 1>/dev/null
 
   say "Try to generate agent keypair..."
   if [[ -f $KEYPAIR_PATH ]]; then
@@ -74,7 +71,6 @@ do_install() {
   fi
 
   IP_ADDR=$(hostname -I | cut -f1 -d' ')
-  OS=$(detect_os)
 
   say "Starting docker container..."
   CONTAINER_ID="$(docker run -d -it --restart=always --name $CONTAINER_NAME \
@@ -86,8 +82,8 @@ do_install() {
     -v $SSHKEY_PATH:/root/.ssh \
     -v $KEYPAIR_PATH:/app/keypair.json \
     -v $WORKING_DIR/logs:/app/logs \
+    -v "$CONTAINER_NAME-ansible":/app/ansible \
     -e DOCKER_HOST_IP="$IP_ADDR" \
-    -e DOCKER_HOST_OS="$OS" \
     -e AGENT_CLUSTER="$CLUSTER" \
     -e AGENT_CHANNEL_ID="$CID" \
     $IMAGE_NAME:$AGENT_RELEASE \
@@ -104,7 +100,6 @@ do_install() {
   say "Cluster: $CLUSTER"
   say "Agent Address: $PUBKEY"
   say "Host Address: $IP_ADDR"
-  say "Host OS: $OS"
   say ""
   say "Done"
 }
@@ -131,6 +126,15 @@ is_valid_cluster() {
     say "Cluster: $@"
   else
     err "Invalid cluster \"$@\""
+  fi
+}
+
+is_valid_os() {
+  read -r OS VER < <(detect_os)
+  if [[ "$OS" =~ ^(Ubuntu|Debian)$ ]]; then
+    say "OS: $OS ($VER)"
+  else
+    err "Unsupported operating system \"$OS\". Only Ubuntu and Debian distributions are supported."
   fi
 }
 
@@ -178,7 +182,7 @@ detect_os() {
     OS=$(uname -s)
     VER=$(uname -r)
   fi
-  echo "$OS, $VER"
+  echo "$OS" "$VER"
 }
 
 err() {
