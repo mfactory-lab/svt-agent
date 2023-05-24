@@ -99,7 +99,8 @@ do_install() {
   say ""
   say "Cluster: $CLUSTER"
   say "Agent Address: $PUBKEY"
-  say "Host Address: $IP_ADDR"
+  say "Agent Release: $AGENT_RELEASE"
+  say "Host IP: $IP_ADDR"
   say ""
   say "Done"
 }
