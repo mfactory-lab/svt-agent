@@ -29,11 +29,11 @@ pub const AGENT_NAME: &str = "agent";
 pub const DEFAULT_MONITOR_PORT: &str = "8888";
 
 /// Configuration files to be added to each task as `--extra-vars=@file`
-pub const TASK_CONFIG_FILES: &[&str] = &[
+pub const TASK_EXTRA_VARS: &[&str] = &[
     "{home}/inventory/group_vars/all.yml",
     "{home}/inventory/group_vars/{cluster}_validators.yaml",
-    "/etc/sv_manager/sv_manager.conf",
 ];
+pub const TASK_EXTRA_VARS_CHECKED: &[&str] = &["/etc/sv_manager/sv_manager.conf"];
 
 pub const TASK_VERSION_ARG: &str = "pb-version";
 pub const TASK_WORKING_DIR: &str = "/ansible";

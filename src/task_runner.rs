@@ -1,5 +1,6 @@
 use crate::constants::{
-    ANSIBLE_DEFAULT_TAG, ANSIBLE_IMAGE, CONTAINER_NAME, TASK_CONFIG_FILES, TASK_VERSION_ARG, TASK_WORKING_DIR,
+    ANSIBLE_DEFAULT_TAG, ANSIBLE_IMAGE, CONTAINER_NAME, TASK_EXTRA_VARS, TASK_EXTRA_VARS_CHECKED, TASK_VERSION_ARG,
+    TASK_WORKING_DIR,
 };
 use crate::monitor::{TaskMonitor, TaskMonitorOptions};
 use crate::notifier::{Notifier, NotifierOpts};
@@ -312,11 +313,18 @@ impl TaskRunner {
             ),
         ];
 
-        for file in TASK_CONFIG_FILES {
+        for file in TASK_EXTRA_VARS {
             let file = file
                 .replace("{home}", TASK_WORKING_DIR)
                 .replace("{cluster}", &self.opts.cluster.to_string());
+
             cmd.push(format!("--extra-vars=@{}", file));
+        }
+
+        for file in TASK_EXTRA_VARS_CHECKED {
+            if Path::new(file).exists() {
+                cmd.push(format!("--extra-vars=@{}", file));
+            }
         }
 
         if !task.args.is_empty() {
