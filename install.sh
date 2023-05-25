@@ -176,10 +176,10 @@ is_valid_cluster() {
 
 is_valid_os() {
   read -r OS VER < <(detect_os)
-  if [[ "$OS" =~ ^(Ubuntu|Debian)$ ]]; then
+  if [[ "$OS" =~ ^(Ubuntu)$ ]]; then
     say "OS: $OS ($VER)"
   else
-    err "Unsupported operating system \"$OS\". Only Ubuntu and Debian distributions are supported for now."
+    err "Unsupported operating system \"$OS\". Currently only Ubuntu is supported."
   fi
 }
 
