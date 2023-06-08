@@ -45,6 +45,11 @@ impl Task {
     pub fn is_skipped(&self) -> bool {
         self.action == "skip"
     }
+
+    pub fn version(&self) -> String {
+        let default = env::var("PLAYBOOK_VERSION").unwrap_or(ANSIBLE_DEFAULT_TAG.to_string());
+        self.args.get(TASK_VERSION_ARG).map_or(&default, |v| v).to_owned()
+    }
 }
 
 #[derive(Debug, Clone, AnchorSerialize, AnchorDeserialize, Eq, PartialEq)]
@@ -293,12 +298,7 @@ impl TaskRunner {
     }
 
     fn build_image_name(&self, task: &Task) -> String {
-        let version = task
-            .args
-            .get(TASK_VERSION_ARG)
-            .map_or(ANSIBLE_DEFAULT_TAG, |v| v.as_str());
-
-        format!("{}:{}", ANSIBLE_IMAGE, version)
+        format!("{}:{}", ANSIBLE_IMAGE, task.version())
     }
 
     fn build_cmd(&self, task: &Task) -> Vec<String> {
