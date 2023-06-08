@@ -1,6 +1,10 @@
-use crate::constants::{ANSIBLE_IMAGE, CONTAINER_NAME, TASK_CONFIG_FILES, TASK_WORKING_DIR};
+use crate::constants::{
+    ANSIBLE_DEFAULT_TAG, ANSIBLE_IMAGE, CONTAINER_NAME, TASK_EXTRA_VARS, TASK_EXTRA_VARS_CHECKED, TASK_VERSION_ARG,
+    TASK_WORKING_DIR,
+};
 use crate::monitor::{TaskMonitor, TaskMonitorOptions};
 use crate::notifier::{Notifier, NotifierOpts};
+use crate::utils::{get_container_logs, pull_image, ContainerLogFlags};
 use crate::AgentArgs;
 use anchor_client::Cluster;
 use anchor_lang::prelude::*;
@@ -17,8 +21,7 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 use tokio::sync::{Mutex, MutexGuard};
 use tokio::time;
-use tracing::{debug, info};
-use tracing::{error, warn};
+use tracing::{debug, error, info, warn};
 
 /// Prevent starting the monitoring when commands executes immediately
 const MONITOR_START_TIMEOUT_MS: u64 = 2000;
@@ -69,10 +72,10 @@ pub struct TaskRunnerOpts {
     pub cluster: Cluster,
 }
 
-impl TaskRunnerOpts {
-    pub fn new(args: &AgentArgs) -> Self {
-        let working_dir = if let Some(working_dir) = &args.working_dir {
-            working_dir.into()
+impl From<&AgentArgs> for TaskRunnerOpts {
+    fn from(args: &AgentArgs) -> Self {
+        let working_dir = if let Some(path) = &args.working_dir {
+            PathBuf::from(path)
         } else {
             PathBuf::from(DEFAULT_WORKING_DIR)
         };
@@ -124,7 +127,6 @@ impl TaskRunner {
 
     /// Prepare the runner before run tasks
     /// Check is valid `working_dir`
-    /// Pull [ANSIBLE_IMAGE] if not exists
     #[tracing::instrument(skip_all)]
     pub async fn init(&mut self) -> Result<()> {
         if !self.opts.working_dir.is_dir() {
@@ -143,30 +145,10 @@ impl TaskRunner {
         self.load_state().await?;
 
         // pull ansible image if needed
-        self.pull_image(ANSIBLE_IMAGE).await?;
+        // pull_image(ANSIBLE_IMAGE).await?;
 
         // setup monitoring
         TaskMonitor::init(&self.docker).await?;
-
-        Ok(())
-    }
-
-    /// Pull docker [image] and show result info
-    async fn pull_image(&self, image: impl Into<String>) -> Result<()> {
-        let mut stream = self
-            .docker
-            .images()
-            .pull(&PullOptions::builder().image(image).build());
-
-        while let Some(pull_result) = stream.next().await {
-            match pull_result {
-                Ok(output) => info!("{:?}", output),
-                Err(e) => {
-                    info!("Error: {}", e);
-                    return Err(Error::from(e));
-                }
-            }
-        }
 
         Ok(())
     }
@@ -182,20 +164,14 @@ impl TaskRunner {
         self.ping().await?;
 
         if let Some(task) = self.queue.pop_front() {
-            let notifier_opts = NotifierOpts::new()
-                .with_cluster(self.opts.cluster.clone())
-                .with_channel_id(self.opts.channel_id);
-            let mut notifier = Notifier::new(&notifier_opts, &task);
-            // probably docker error
+            let mut notifier = self.notifier().with_task(&task);
             let mut internal_error: Option<Error> = None;
             let mut status_code: Option<u64> = None;
 
             match self.run_task(&task).await {
                 Ok(container) => {
-                    let _ = notifier.notify_start().await;
-                    self.set_state(RunState::Processing(task.clone()))
-                        .await
-                        .ok();
+                    let _ = notifier.notify_task_start().await;
+                    self.set_state(RunState::Processing(task.clone())).await.ok();
 
                     let monitor_opts = TaskMonitorOptions::new()
                         .filter(self.opts.container_name.as_ref())
@@ -204,8 +180,7 @@ impl TaskRunner {
 
                     let mut monitor = TaskMonitor::new(&monitor_opts, &self.docker);
 
-                    let monitor_start_timeout =
-                        time::sleep(Duration::from_millis(self.opts.monitor_start_timeout_ms));
+                    let monitor_start_timeout = time::sleep(Duration::from_millis(self.opts.monitor_start_timeout_ms));
                     tokio::pin!(monitor_start_timeout);
 
                     loop {
@@ -234,9 +209,8 @@ impl TaskRunner {
                     if let Some(status_code) = status_code {
                         if status_code == 0 {
                             self.set_state(RunState::Complete(task.clone())).await.ok();
-                            let output =
-                                get_container_logs(&container, ContainerLogFlags::StdOut).await;
-                            let _ = notifier.notify_finish(status_code, output).await;
+                            let output = get_container_logs(&container, ContainerLogFlags::StdOut).await;
+                            let _ = notifier.notify_task_finish(status_code, output).await;
                         } else {
                             self.set_state(RunState::Error(task.clone())).await.ok();
                             let output = get_container_logs(
@@ -247,7 +221,7 @@ impl TaskRunner {
                                 },
                             )
                             .await;
-                            notifier.notify_error(output).await.ok();
+                            notifier.notify_task_error(output).await.ok();
                         }
                     }
 
@@ -269,7 +243,7 @@ impl TaskRunner {
 
             if let Some(e) = internal_error {
                 self.set_state(RunState::Error(task.clone())).await.ok();
-                notifier.notify_error(e.to_string()).await.ok();
+                notifier.notify_task_error(e.to_string()).await.ok();
                 return Err(e);
             }
         }
@@ -281,23 +255,20 @@ impl TaskRunner {
     #[tracing::instrument(skip_all)]
     async fn run_task(&self, task: &Task) -> Result<Container> {
         // Delete if exists
-        if let Err(e) = self
-            .docker
-            .containers()
-            .get(&self.opts.container_name)
-            .delete()
-            .await
-        {
-            error!("Error: Failed to delete container. {}", e)
+        if let Err(e) = self.docker.containers().get(&self.opts.container_name).delete().await {
+            // error!("Error: Failed to delete container. {}", e)
         }
+
+        // pull ansible image if needed
+        pull_image(&self.docker, &self.build_image_name(task)).await?;
 
         let cmd = self.build_cmd(task);
 
-        let options = ContainerOptions::builder(ANSIBLE_IMAGE)
+        let options = ContainerOptions::builder(&self.build_image_name(task))
             .name(&self.opts.container_name)
+            .working_dir(TASK_WORKING_DIR)
             .network_mode("host")
             .volumes_from(vec![CONTAINER_NAME])
-            .working_dir(TASK_WORKING_DIR)
             .cmd(cmd.iter().map(|c| c.as_str()).collect())
             .env(["ANSIBLE_HOST_KEY_CHECKING=False"])
             .build();
@@ -321,6 +292,15 @@ impl TaskRunner {
         Ok(container)
     }
 
+    fn build_image_name(&self, task: &Task) -> String {
+        let version = task
+            .args
+            .get(TASK_VERSION_ARG)
+            .map_or(ANSIBLE_DEFAULT_TAG, |v| v.as_str());
+
+        format!("{}:{}", ANSIBLE_IMAGE, version)
+    }
+
     fn build_cmd(&self, task: &Task) -> Vec<String> {
         let mut cmd = vec![
             "ansible-playbook".to_string(),
@@ -333,12 +313,16 @@ impl TaskRunner {
             ),
         ];
 
-        for file in TASK_CONFIG_FILES {
+        for file in TASK_EXTRA_VARS {
             let file = file
                 .replace("{home}", TASK_WORKING_DIR)
                 .replace("{cluster}", &self.opts.cluster.to_string());
 
-            if Path::new(&file).exists() {
+            cmd.push(format!("--extra-vars=@{}", file));
+        }
+
+        for file in TASK_EXTRA_VARS_CHECKED {
+            if Path::new(file).exists() {
                 cmd.push(format!("--extra-vars=@{}", file));
             }
         }
@@ -350,6 +334,15 @@ impl TaskRunner {
         cmd.push(format!("./playbooks/{}.yaml", task.name));
 
         cmd
+    }
+
+    fn notifier(&self) -> Notifier {
+        let notifier_opts = NotifierOpts::new()
+            .with_cluster(self.opts.cluster.clone())
+            .with_channel_id(self.opts.channel_id)
+            .with_logs_path(self.opts.working_dir.join("logs"));
+
+        Notifier::new(notifier_opts)
     }
 
     /// Deduplicate the [queue]
@@ -386,13 +379,6 @@ impl TaskRunner {
         self.queue.retain(|t| t.id != task_id);
     }
 
-    pub async fn notify_event(&self, task: &Task, event: &str) -> Result<()> {
-        let opts = NotifierOpts::new()
-            .with_cluster(self.opts.cluster.clone())
-            .with_channel_id(self.opts.channel_id);
-        Notifier::new(&opts, task).notify(event).await
-    }
-
     #[tracing::instrument(skip(self))]
     pub async fn reset_state(&self) -> Result<()> {
         self.set_state(RunState::default()).await
@@ -426,52 +412,6 @@ impl TaskRunner {
     }
 }
 
-#[allow(non_snake_case, non_upper_case_globals)]
-mod ContainerLogFlags {
-    pub const StdOut: u8 = 0x01;
-    pub const StdErr: u8 = 0x02;
-    pub const All: u8 = 0xFF;
-}
-
-/// Try to get the [container] output
-#[tracing::instrument(skip(container))]
-async fn get_container_logs(container: &Container<'_>, mode: u8) -> String {
-    let mut res = String::new();
-
-    let mut logs_stream = container.logs(
-        &LogsOptions::builder()
-            .timestamps(true)
-            .stdout(true)
-            .stderr(true)
-            .build(),
-    );
-
-    while let Some(log_result) = logs_stream.next().await {
-        match log_result {
-            Ok(chunk) => match chunk {
-                TtyChunk::StdOut(bytes) => {
-                    if mode & ContainerLogFlags::StdOut == 1 {
-                        res.push_str(std::str::from_utf8(&bytes).unwrap());
-                    }
-
-                    info!("StdOut: {}", std::str::from_utf8(&bytes).unwrap());
-                }
-                TtyChunk::StdErr(bytes) => {
-                    if mode & ContainerLogFlags::StdErr == 2 {
-                        res.push_str(std::str::from_utf8(&bytes).unwrap());
-                    }
-
-                    info!("StdErr: {}", std::str::from_utf8(&bytes).unwrap());
-                }
-                _ => {}
-            },
-            Err(e) => error!("Failed to get container logs: {}", e),
-        }
-    }
-
-    res
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -479,7 +419,7 @@ mod tests {
     use tracing_test::traced_test;
 
     fn get_task_runner() -> TaskRunner {
-        TaskRunner::new(TaskRunnerOpts::new(&AgentArgs {
+        TaskRunner::new(TaskRunnerOpts::from(&AgentArgs {
             keypair: Default::default(),
             cluster: Default::default(),
             channel_id: Default::default(),
@@ -487,6 +427,28 @@ mod tests {
             working_dir: None,
             monitor_port: 0,
         }))
+    }
+
+    #[test]
+    fn test_build_name() {
+        let mut runner = get_task_runner();
+
+        let version = "test";
+
+        let mut task = Task {
+            id: 1,
+            name: "test".to_string(),
+            args: Default::default(),
+            secret: "".to_string(),
+            action: "".to_string(),
+        };
+
+        let cmd = runner.build_image_name(&task);
+        assert_eq!(cmd, format!("{}:{}", ANSIBLE_IMAGE, ANSIBLE_DEFAULT_TAG));
+
+        task.args = HashMap::from([(TASK_VERSION_ARG.to_string(), version.to_string())]);
+        let cmd = runner.build_image_name(&task);
+        assert_eq!(cmd, format!("{}:{}", ANSIBLE_IMAGE, version));
     }
 
     #[test]
@@ -540,5 +502,12 @@ mod tests {
 
         let res = runner.run().await;
         println!("{:?}", res);
+    }
+
+    #[test]
+    fn test_notifier() {
+        let mut runner = get_task_runner();
+        let n = runner.notifier();
+        assert_eq!(n.opts.logs_path, Some(PathBuf::from("/app/logs")));
     }
 }

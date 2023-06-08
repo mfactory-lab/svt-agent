@@ -23,10 +23,7 @@ pub struct MessengerClient {
 
 impl MessengerClient {
     pub fn new(cluster: Cluster, program_id: Pubkey, authority: Keypair) -> Self {
-        let rpc = RpcClient::new_with_commitment(
-            cluster.url().to_string(),
-            CommitmentConfig::confirmed(),
-        );
+        let rpc = RpcClient::new_with_commitment(cluster.url().to_string(), CommitmentConfig::confirmed());
 
         Self {
             rpc,
@@ -153,21 +150,14 @@ impl MessengerClient {
     }
 
     pub fn membership_pda(&self, channel: &Pubkey, authority: &Pubkey) -> (Pubkey, u8) {
-        Pubkey::find_program_address(
-            &[&channel.to_bytes(), &authority.to_bytes()],
-            &self.program_id,
-        )
+        Pubkey::find_program_address(&[&channel.to_bytes(), &authority.to_bytes()], &self.program_id)
     }
 
     pub fn device_pda(&self, membership: &Pubkey, key: &Pubkey) -> (Pubkey, u8) {
         Pubkey::find_program_address(&[&membership.to_bytes(), &key.to_bytes()], &self.program_id)
     }
 
-    async fn send_transaction(
-        &self,
-        message: Message,
-        signers: Option<Vec<&Keypair>>,
-    ) -> Result<Signature> {
+    async fn send_transaction(&self, message: Message, signers: Option<Vec<&Keypair>>) -> Result<Signature> {
         let mut tx = Transaction::new_unsigned(message);
         let blockhash = self.rpc.get_latest_blockhash().await?;
 

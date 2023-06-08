@@ -4,9 +4,12 @@
 #
 # SVT Agent installation script
 #
-# Run command:
-#   CLUSTER=devnet CID=QXK7qRCaabreGjcNHcKEadQDtTY9BJKHKfU11QAE6Xp \
+# Stable version:
+#   CID=Bk1EAvKminEwHjyVhG2QA7sQeU1W3zPnFE6rTnLWDKYJ \
 #   bash -c "$(curl -sSfL https://mfactory-lab.github.io/svt-agent/install.sh)"
+#
+# Nightly version:
+#   CID=Bk1EAvKminEwHjyVhG2QA7sQeU1W3zPnFE6rTnLWDKYJ AGENT_RELEASE=nightly bash -c "$(curl -sSfL https://mfactory-lab.github.io/svt-agent/install-dev.sh)"
 #
 
 IMAGE_NAME=ghcr.io/mfactory-lab/svt-agent
@@ -26,6 +29,7 @@ fi
 do_install() {
   echo "Installing SVT Agent..."
 
+  ensure is_valid_os
   # ensure is_valid_cluster $CLUSTER
   # TODO: validate channel_id
   # ensure is_valid_channel $CID
@@ -44,10 +48,6 @@ do_install() {
 
   mkdir -p $WORKING_DIR
   mkdir -p $WORKING_DIR/logs
-
-  #say "Setup firewall..."
-  #sudo ufw allow $EXPOSE_PORT/tcp
-  #say "Done"
 
   say "Downloading agent image (release: $AGENT_RELEASE)..."
   ensure docker pull $IMAGE_NAME:$AGENT_RELEASE
@@ -79,13 +79,13 @@ do_install() {
     --log-opt max-file=5 \
     -v /var/run/docker.sock:/var/run/docker.sock \
     -v /etc/sv_manager:/etc/sv_manager \
-    -v svt-agent-ansible:/app/ansible \
     -v $SSHKEY_PATH:/root/.ssh \
     -v $KEYPAIR_PATH:/app/keypair.json \
     -v $WORKING_DIR/logs:/app/logs \
-    -e DOCKER_HOST_IP=$IP_ADDR \
-    -e AGENT_CLUSTER=$CLUSTER \
-    -e AGENT_CHANNEL_ID=$CID \
+    -v "$CONTAINER_NAME-ansible":/app/ansible \
+    -e DOCKER_HOST_IP="$IP_ADDR" \
+    -e AGENT_CLUSTER="$CLUSTER" \
+    -e AGENT_CHANNEL_ID="$CID" \
     $IMAGE_NAME:$AGENT_RELEASE \
     run)"
 
@@ -98,8 +98,9 @@ do_install() {
   say "Please add some balance to the agent address."
   say ""
   say "Cluster: $CLUSTER"
-  say "Agent Address(Pubkey): $PUBKEY"
-  say "Host Address: $IP_ADDR"
+  say "Agent Address: $PUBKEY"
+  say "Agent Release: $AGENT_RELEASE"
+  say "Host IP: $IP_ADDR"
   say ""
   say "Done"
 }
@@ -111,6 +112,11 @@ generate_sshkey() {
     mkdir -p $SSHKEY_PATH
     ssh-keygen -t rsa -b 4096 -f "$SSHKEY_PATH/$@" -q -N '' -C 'svt-agent'
     chmod 600 "$SSHKEY_PATH/$@"
+
+    # prepare authorized_keys
+    [[ ! -d ~/.ssh ]] && mkdir -p ~/.ssh && chmod 700 ~/.ssh
+    [[ ! -f ~/.ssh/authorized_keys ]] && touch ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys
+
     # check trailing newline
     x=$(tail -c 1 ~/.ssh/authorized_keys)
     if [ "$x" != "" ]
@@ -121,11 +127,59 @@ generate_sshkey() {
   fi
 }
 
+# Retrieves the operating system information.
+# This function checks various methods to determine the OS and its version,
+# including checking the /etc/os-release file, using the lsb_release command,
+# and fallback options such as /etc/lsb-release, /etc/debian_version, and uname command.
+# The OS and version information are stored in the variables OS and VER, respectively.
+# Returns the OS and version as a string in the format "OS, Version".
+detect_os() {
+  if [ -f /etc/os-release ]; then
+    # freedesktop.org and systemd
+    . /etc/os-release
+    OS=$NAME
+    VER=$VERSION_ID
+  elif command -v lsb_release >/dev/null 2>&1; then
+    # linuxbase.org
+    OS=$(lsb_release -si)
+    VER=$(lsb_release -sr)
+  elif [ -f /etc/lsb-release ]; then
+    # For some versions of Debian/Ubuntu without lsb_release command
+    . /etc/lsb-release
+    OS=$DISTRIB_ID
+    VER=$DISTRIB_RELEASE
+  elif [ -f /etc/debian_version ]; then
+    # Older Debian/Ubuntu/etc.
+    OS=Debian
+    VER=$(cat /etc/debian_version)
+  elif [ -f /etc/SuSe-release ]; then
+    # Older SuSE/etc.
+    ...
+  elif [ -f /etc/redhat-release ]; then
+    # Older Red Hat, CentOS, etc.
+    ...
+  else
+    # Fall back to uname, e.g. "Linux <version>", also works for BSD, etc.
+    OS=$(uname -s)
+    VER=$(uname -r)
+  fi
+  echo "$OS" "$VER"
+}
+
 is_valid_cluster() {
   if [[ "$@" =~ ^(mainnet-beta|devnet|testnet)$ ]]; then
     say "Cluster: $@"
   else
     err "Invalid cluster \"$@\""
+  fi
+}
+
+is_valid_os() {
+  read -r OS VER < <(detect_os)
+  if [[ "$OS" =~ ^(Ubuntu)$ ]]; then
+    say "OS: $OS ($VER)"
+  else
+    err "Unsupported operating system \"$OS\". Currently only Ubuntu is supported."
   fi
 }
 

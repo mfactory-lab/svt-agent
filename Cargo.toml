@@ -1,41 +1,44 @@
 [package]
 name = "svt-agent"
 description = ""
-version = "0.1.52"
+version = "0.1.60"
 authors = ["Vladyslav Korniienko <vk.tiamo@gmail.com>"]
 repository = "https://github.com/mfactory-lab/svt-agent"
 edition = "2021"
 
 [dependencies]
 anyhow = "^1.0"
-clap = { version = "^4.2.7", features = ["derive", "env"] }
-chrono = { version = "^0.4", features = ["clock"] }
-anchor-client = "^0.26.0"
-anchor-lang = "^0.26.0"
-hyper = { version = "0.14", features = ["client"] }
+anchor-client = "^0.27.0"
+anchor-lang = "^0.27.0"
+clap = { version = "^4.3", features = ["derive", "env"] }
+chrono = { version = "^0.4", default-features = false }
+chacha20poly1305 = "0.9"
+curve25519-dalek = "^3.2"
+futures = "0.3"
+hyper = "0.14"
 tokio = "^1.22"
 tracing = "^0.1"
-tracing-subscriber = { version = "^0.3", features = ["env-filter"] }
+tracing-subscriber = { version = "^0.3",  features = ["env-filter"] }
 tracing-tree = "^0.2"
-futures = "0.3"
 regex = "^1.7"
+influxdb = "0.6.0"
 sha2 = "^0.10"
-chacha20poly1305 = "0.9"
-curve25519-dalek = { version = "^3.2", default-features = false }
-x25519-dalek = "^1.2.0"
-zeroize = "^1.3.0"
 shiplift = "0.7"
 serde_json = "^1.0.89"
 sled = "0.34.1"
 rand = "0.7.3"
-influxdb = { version = "0.5.2", features = ["derive"] }
+x25519-dalek = "^1.2.0"
+zeroize = "^1.3.0"
 
 [dev-dependencies]
 tracing-test = "0.2.3"
+wiremock = "0.5.18"
 
 [profile.release]
+#strip = true
+#incremental = true
 codegen-units = 1
-opt-level = "z"
+opt-level = 2
 lto = "fat"
 #panic = "abort"
-debug = false
+#debug = false

@@ -20,6 +20,7 @@ use tracing_subscriber::filter::combinator::Not;
 #[derive(Default, Clone)]
 pub struct NotifierOpts {
     pub channel_id: Pubkey,
+    pub agent_id: Pubkey,
     pub cluster: Cluster,
     pub logs_path: Option<PathBuf>,
     pub webhook_url: String,
@@ -33,12 +34,9 @@ pub struct NotifierOpts {
 impl NotifierOpts {
     pub fn new() -> Self {
         Self {
-            influx_url: std::env::var("AGENT_NOTIFY_INFLUX_URL")
-                .unwrap_or_else(|_| NOTIFY_INFLUX_URL.to_string()),
-            influx_db: std::env::var("AGENT_NOTIFY_INFLUX_DB")
-                .unwrap_or_else(|_| NOTIFY_INFLUX_DB.to_string()),
-            influx_user: std::env::var("AGENT_NOTIFY_INFLUX_USER")
-                .unwrap_or_else(|_| NOTIFY_INFLUX_USER.to_string()),
+            influx_url: std::env::var("AGENT_NOTIFY_INFLUX_URL").unwrap_or_else(|_| NOTIFY_INFLUX_URL.to_string()),
+            influx_db: std::env::var("AGENT_NOTIFY_INFLUX_DB").unwrap_or_else(|_| NOTIFY_INFLUX_DB.to_string()),
+            influx_user: std::env::var("AGENT_NOTIFY_INFLUX_USER").unwrap_or_else(|_| NOTIFY_INFLUX_USER.to_string()),
             influx_pass: std::env::var("AGENT_NOTIFY_INFLUX_PASSWORD")
                 .unwrap_or_else(|_| NOTIFY_INFLUX_PASS.to_string()),
             influx_max_attempts: 5,
@@ -63,6 +61,11 @@ impl NotifierOpts {
         self
     }
 
+    pub fn with_agent_id(mut self, agent_id: Pubkey) -> Self {
+        self.agent_id = agent_id;
+        self
+    }
+
     pub fn with_cluster(mut self, cluster: Cluster) -> Self {
         self.cluster = cluster;
         self
@@ -80,41 +83,60 @@ impl NotifierOpts {
 }
 
 pub struct Notifier<'a> {
-    /// The [Task] which will be notified
-    task: &'a Task,
     /// Notifier options
-    opts: &'a NotifierOpts,
+    pub(crate) opts: NotifierOpts,
     /// Parameters to be sent
     params: HashMap<&'a str, String>,
+    /// The [Task] which will be notified
+    task: Option<&'a Task>,
 }
 
 impl<'a> Notifier<'a> {
-    pub fn new(opts: &'a NotifierOpts, task: &'a Task) -> Self {
+    pub fn new(opts: NotifierOpts) -> Self {
         Self {
-            task,
             opts,
+            task: None,
             params: Default::default(),
         }
+    }
+
+    pub fn with_task(mut self, task: &'a Task) -> Self {
+        self.task = Some(task);
+        self
     }
 
     pub async fn notify_start(&self) -> Result<()> {
         self.notify("start").await
     }
 
-    pub async fn notify_finish(&mut self, status_code: u64, output: String) -> Result<()> {
-        self.params.insert("status_code", status_code.to_string());
-        self.params.insert("output", output);
-        self.notify("finish").await
+    pub async fn notify_authorize(&self) -> Result<()> {
+        self.notify("authorize").await
     }
 
-    pub async fn notify_error<E: Into<String>>(&mut self, error: E) -> Result<()> {
+    pub async fn notify_task_start(&self) -> Result<()> {
+        self.notify("task:start").await
+    }
+
+    pub async fn notify_task_finish(&mut self, status_code: u64, output: String) -> Result<()> {
+        self.params.insert("status_code", status_code.to_string());
+        self.params.insert("output", output);
+        self.notify("task:finish").await
+    }
+
+    pub async fn notify_task_skip(&self) -> Result<()> {
+        self.notify("task:skip").await
+    }
+
+    pub async fn notify_task_error<E: Into<String>>(&mut self, error: E) -> Result<()> {
         self.params.insert("error", error.into());
-        self.notify("error").await
+        self.notify("task:error").await
     }
 
     #[tracing::instrument(skip_all)]
     pub async fn notify(&self, event: &str) -> Result<()> {
-        info!("Task #{} notify({})", self.task.id, event);
+        if let Some(task) = self.task {
+            info!("Task #{} notify({})", task.id, event);
+        }
 
         let (save_result, influx_result, webhook_result) = tokio::join!(
             self.save_to_file(),
@@ -123,11 +145,11 @@ impl<'a> Notifier<'a> {
         );
 
         if let Err(e) = save_result {
-            warn!("[File] {}", e);
+            warn!("{}", e);
         }
 
         if let Err(e) = influx_result {
-            warn!("[Influx] {}", e);
+            warn!("{}", e);
         }
 
         webhook_result?;
@@ -139,32 +161,30 @@ impl<'a> Notifier<'a> {
     #[tracing::instrument(skip_all)]
     async fn save_to_file(&self) -> Result<()> {
         if let Some(path) = &self.opts.logs_path {
-            if let Some(data) = self
-                .params
-                .get("output")
-                .or_else(|| self.params.get("error"))
-            {
-                let file_name = format!("{}_{}.log", self.task.id, Utc::now().format("%Y%m%d%H%M"));
+            if !path.is_dir() {
+                return Err(Error::msg(format!(
+                    "Invalid logs path `{}`.",
+                    path.to_str().unwrap_or_default()
+                )));
+            }
+
+            if let Some(data) = self.params.get("output").or_else(|| self.params.get("error")) {
+                let file_name = format!(
+                    "{}_{}.log",
+                    self.task.map_or(0, |t| t.id),
+                    Utc::now().format("%Y%m%d%H%M")
+                );
 
                 let path = path.join(&file_name);
 
-                match OpenOptions::new()
-                    .append(true)
-                    .create(true)
-                    .open(&path)
-                    .await
-                {
+                match OpenOptions::new().append(true).create(true).open(&path).await {
                     Ok(mut file) => {
                         if let Err(e) = file.write_all(data.as_bytes()).await {
                             error!("Unable to write log data. {}", e);
                         }
                     }
                     Err(e) => {
-                        error!(
-                            "Unable to open log file ({}). {}",
-                            path.to_str().unwrap_or("?"),
-                            e
-                        );
+                        error!("Unable to open log file ({}). {}", path.to_str().unwrap_or("?"), e);
                     }
                 }
             }
@@ -178,11 +198,15 @@ impl<'a> Notifier<'a> {
         if !self.opts.webhook_url.is_empty() {
             let client = hyper::Client::new();
             let mut params = self.params.clone();
-            params.insert("agent_version", env!("CARGO_PKG_VERSION").to_string());
+            params.insert("event", event.into());
             params.insert("cluster", self.opts.cluster.to_string());
             params.insert("channel_id", self.opts.channel_id.to_string());
-            params.insert("task_id", self.task.id.to_string());
-            params.insert("event", event.into());
+            params.insert("agent_id", self.opts.agent_id.to_string());
+            params.insert("agent_version", env!("CARGO_PKG_VERSION").to_string());
+
+            if let Some(t) = self.task {
+                params.insert("task_id", t.id.to_string());
+            }
 
             let data = json!(params);
 
@@ -211,14 +235,22 @@ impl<'a> Notifier<'a> {
             return Err(Error::msg("Channel id required"));
         }
 
-        let write_query = Timestamp::from(Utc::now())
-            .into_query("task_logs")
-            .add_field("cluster", self.opts.cluster.to_string())
-            .add_field("channel_id", self.opts.channel_id.to_string())
-            .add_field("task_id", self.task.id)
-            .add_field("task_name", self.task.name.to_string())
-            .add_field("agent_version", env!("CARGO_PKG_VERSION"))
-            .add_tag("event", event.into());
+        let mut write_query = {
+            let q = Timestamp::from(Utc::now())
+                .into_query(NOTIFY_INFLUX_TABLE)
+                .add_tag("event", event.into())
+                .add_field("cluster", self.opts.cluster.to_string())
+                .add_field("channel_id", self.opts.channel_id.to_string())
+                .add_field("agent_id", self.opts.agent_id.to_string())
+                .add_field("agent_version", env!("CARGO_PKG_VERSION"));
+
+            if let Some(t) = self.task {
+                q.add_field("task_id", t.id.to_string())
+                    .add_field("task_name", t.name.to_string())
+            } else {
+                q
+            }
+        };
 
         info!("[Influx] Request `{:?}` ...", write_query);
 

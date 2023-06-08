@@ -174,7 +174,8 @@ mod tests {
     #[test]
     fn test_decrypt_cek() {
         let cek = CEKData {
-            header: "vs3gIr710ivLea1va2vAfNmhUfLE+D2bMzA3KnlZlMeXlmc0T5Tbb9Br3XG4lpkpA7wnNcPiSEmh7X2/bmUa1MVBAkntxnUp".to_string(),
+            header: "vs3gIr710ivLea1va2vAfNmhUfLE+D2bMzA3KnlZlMeXlmc0T5Tbb9Br3XG4lpkpA7wnNcPiSEmh7X2/bmUa1MVBAkntxnUp"
+                .to_string(),
             encrypted_key: "lIRaL0hk8yb3J+ASEkKmZqW+x8Y2zo/3K06dN255jaA=".to_string(),
         };
 
@@ -190,8 +191,8 @@ mod tests {
         assert_eq!(
             res,
             [
-                159, 163, 245, 237, 4, 56, 130, 57, 52, 134, 158, 3, 198, 242, 7, 239, 60, 14, 74,
-                29, 65, 21, 109, 66, 139, 187, 226, 89, 32, 167, 36, 154
+                159, 163, 245, 237, 4, 56, 130, 57, 52, 134, 158, 3, 198, 242, 7, 239, 60, 14, 74, 29, 65, 21, 109, 66,
+                139, 187, 226, 89, 32, 167, 36, 154
             ]
         );
     }
@@ -201,8 +202,8 @@ mod tests {
         let expected = "abc";
         let encrypted = "aFdMrRbgPz6brrc46CeD9ipK1meHn0S5A3I42aiY2bwQ8jaoZqV+qGSIKw==";
         let cek = [
-            159, 163, 245, 237, 4, 56, 130, 57, 52, 134, 158, 3, 198, 242, 7, 239, 60, 14, 74, 29,
-            65, 21, 109, 66, 139, 187, 226, 89, 32, 167, 36, 154,
+            159, 163, 245, 237, 4, 56, 130, 57, 52, 134, 158, 3, 198, 242, 7, 239, 60, 14, 74, 29, 65, 21, 109, 66,
+            139, 187, 226, 89, 32, 167, 36, 154,
         ];
         let res = decrypt_message(encrypted, &cek).expect("Cannot decrypt");
         let actual = String::from_utf8(res).unwrap();

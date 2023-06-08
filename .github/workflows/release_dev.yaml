@@ -1,30 +1,10 @@
-name: Release
-
-#permissions:
-#  contents: "write"
-#
-#on:
-#  workflow_run:
-#    workflows: ["Tag"]
-#    types:
-#      - "completed"
+name: Nightly Release
 
 on:
-#  push:
-#    branches: [ dev ]
-#    paths:
-#      - Cargo.toml
-
-  workflow_dispatch:
-    inputs:
-      tag:
-        description: "Tag"
-        required: true
-        default: "latest"
-        type: choice
-        options:
-          - latest
-          - nightly
+  push:
+    branches: [ dev ]
+    paths:
+      - Cargo.toml
 
 env:
   REGISTRY: ghcr.io
@@ -76,7 +56,7 @@ jobs:
           push: true
           tags: |
             ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ needs.get-tag.outputs.pkg-version }}
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ inputs.tag }}
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:nightly
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max

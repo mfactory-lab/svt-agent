@@ -90,7 +90,6 @@ pub struct AgentArgs {
     pub monitor_port: u16,
 }
 
-// #[tokio::main(flavor = "current_thread")]
 #[tokio::main]
 async fn main() -> Result<()> {
     let cli = Cli::parse();
@@ -117,11 +116,7 @@ async fn main() -> Result<()> {
         Commands::Run(args) => {
             Registry::default()
                 .with(EnvFilter::from_default_env())
-                .with(
-                    HierarchicalLayer::new(2)
-                        .with_targets(true)
-                        .with_bracketed_fields(true),
-                )
+                .with(HierarchicalLayer::new(2).with_targets(true).with_bracketed_fields(true))
                 // .with(
                 //     tracing_subscriber::fmt::layer()
                 //         .json()

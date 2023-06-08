@@ -9,6 +9,8 @@ use anchor_client::solana_client::nonblocking::pubsub_client::{PubsubClient, Pub
 use anchor_client::solana_client::rpc_config::RpcTransactionLogsFilter;
 use anchor_client::solana_sdk::signature::read_keypair_file;
 
+use crate::notifier::{Notifier, NotifierOpts};
+use anchor_client::solana_sdk::signer::Signer;
 use anchor_lang::prelude::Pubkey;
 use anchor_lang::Event;
 use anyhow::{Error, Result};
@@ -31,7 +33,7 @@ impl Agent {
     #[tracing::instrument]
     pub fn new(args: &AgentArgs) -> Result<Self> {
         let keypair = read_keypair_file(&args.keypair).expect("Authority keypair file not found");
-        let runner = TaskRunner::new(TaskRunnerOpts::new(args));
+        let runner = TaskRunner::new(TaskRunnerOpts::from(args));
         let client = MessengerClient::new(args.cluster.clone(), args.program_id, keypair);
 
         Ok(Self {
@@ -47,10 +49,7 @@ impl Agent {
 
     fn print_info(&self) {
         info!("Agent Version: {}", env!("CARGO_PKG_VERSION"));
-        info!(
-            "Agent ID: {:?}",
-            self.ctx.client.authority_pubkey().to_string()
-        );
+        info!("Agent ID: {:?}", self.ctx.client.authority_pubkey().to_string());
         info!("Cluster: {}", self.ctx.client.cluster);
         info!("Program ID: {:?}", self.ctx.client.program_id);
         info!("Channel ID: {:?}", self.ctx.channel_id);
@@ -101,10 +100,7 @@ impl Agent {
                     match runner.current_state().await {
                         RunState::Processing(task) | RunState::Error(task) => {
                             // println!("... {:#?}", task);
-                            info!(
-                                "Previous Task #{} was failed, waiting for manual action...",
-                                task.id
-                            );
+                            info!("Previous Task #{} was failed, waiting for manual action...", task.id);
                             time::sleep(Duration::from_millis(WAIT_ACTION_INTERVAL)).await;
                         }
                         // previous task was complete, try to confirm it
@@ -172,8 +168,9 @@ impl Agent {
                                         warn!("Cannot add a task #{}, probably skipped...", new_task.id);
                                     }
                                 }
-                                Err(_) => {
+                                Err(e) => {
                                     warn!("Failed to convert message to task");
+                                    warn!("{}", e);
                                 }
                             }
                         }
@@ -188,14 +185,15 @@ impl Agent {
                                                 info!("Task #{} was skipped...", new_task.id);
                                                 if task.id == new_task.id {
                                                     runner.reset_state().await;
-                                                    if runner.notify_event(&task, "skip").await.is_err() {
+                                                    if ctx.notifier().with_task(&task).notify_task_skip().await.is_err() {
                                                         info!("Failed to send skip notify...");
                                                     }
                                                 }
                                             }
                                         }
-                                        Err(_) => {
+                                        Err(e) => {
                                             warn!("Failed to convert message to task");
+                                            warn!("{}", e);
                                         }
                                     }
                                 },
@@ -251,8 +249,7 @@ impl Agent {
                             info!("Loading tasks...");
                             ctx.load_tasks().await;
 
-                            let listener =
-                                Listener::new(&ctx.client.program_id, &pub_sub_client, &filter);
+                            let listener = Listener::new(&ctx.client.program_id, &pub_sub_client, &filter);
 
                             let logs_subscribe = listener
                                 .logs_subscribe(Duration::from_secs(LOGS_SUBSCRIBE_TIMEOUT))
@@ -263,7 +260,9 @@ impl Agent {
                                 Ok((mut stream, _unsubscribe)) => {
                                     while let Some(log) = stream.next().await {
                                         // skip simulation
-                                        if log.value.signature == "1111111111111111111111111111111111111111111111111111111111111111" {
+                                        if log.value.signature
+                                            == "1111111111111111111111111111111111111111111111111111111111111111"
+                                        {
                                             info!("Probably simulation, skip...");
                                             continue;
                                         }
@@ -272,28 +271,19 @@ impl Agent {
                                             .on::<NewMessageEvent>(&log, &|evt| {
                                                 info!("{:?}", evt);
                                                 if let Err(e) = new_msg_sender.send(evt) {
-                                                    warn!(
-                                                        "[NewMessageEvent] Failed to send... {}",
-                                                        e
-                                                    );
+                                                    warn!("[NewMessageEvent] Failed to send... {}", e);
                                                 }
                                             })
                                             .on::<DeleteMessageEvent>(&log, &|evt| {
                                                 info!("{:?}", evt);
                                                 if let Err(e) = delete_msg_sender.send(evt) {
-                                                    warn!(
-                                                        "[DeleteMessageEvent] Failed to send... {}",
-                                                        e
-                                                    );
+                                                    warn!("[DeleteMessageEvent] Failed to send... {}", e);
                                                 }
                                             })
                                             .on::<UpdateMessageEvent>(&log, &|evt| {
                                                 info!("{:?}", evt);
                                                 if let Err(e) = update_msg_sender.send(evt) {
-                                                    warn!(
-                                                        "[UpdateMessageEvent] Failed to send... {}",
-                                                        e
-                                                    );
+                                                    warn!("[UpdateMessageEvent] Failed to send... {}", e);
                                                 }
                                             });
                                     }
@@ -342,11 +332,22 @@ impl AgentContext {
             self.runner.lock().await.init().await?;
         }
 
+        let notifier = self.notifier();
+
+        if notifier.notify_start().await.is_err() {
+            info!("Failed to send `start` notify...");
+        }
+
         loop {
             match self.authorize().await {
-                Ok(_) => break,
+                Ok(_) => {
+                    if notifier.notify_authorize().await.is_err() {
+                        info!("Failed to send `authorize` notify...");
+                    }
+                    break;
+                }
                 Err(e) => {
-                    warn!("Auth Error: {}", e);
+                    warn!("Auth Error: {:?}", e);
                     time::sleep(Duration::from_millis(WAIT_AUTHORIZATION_INTERVAL)).await;
                 }
             }
@@ -387,7 +388,7 @@ impl AgentContext {
         let cek = self.cek.lock().await;
         let id_from = *self.last_task_id.lock().await;
 
-        info!("Prepare tasks... (id_from: {})", id_from);
+        info!("Prepare tasks... [last_task_id: {}]", id_from);
 
         let mut tasks = vec![];
         let mut need_reset = false;
@@ -417,8 +418,9 @@ impl AgentContext {
                             tasks.push(task);
                         }
                     }
-                    Err(_) => {
+                    Err(e) => {
                         warn!("Failed to convert message to task... Message#{}", msg_id);
+                        warn!("{}", e);
                     }
                 }
             }
@@ -442,6 +444,17 @@ impl AgentContext {
         info!("Added {} tasks to the runner queue...", added);
 
         Ok(())
+    }
+
+    fn notifier(&self) -> Notifier {
+        let agent_id = self.client.authority_pubkey();
+        let cluster = self.client.cluster.clone();
+        let opts = NotifierOpts::new()
+            .with_agent_id(agent_id)
+            .with_cluster(cluster)
+            .with_channel_id(self.channel_id);
+
+        Notifier::new(opts)
     }
 }
 
