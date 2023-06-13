@@ -18,8 +18,7 @@ By default, the cluster is set to `devnet`, but you can change it using the `CLU
 Here's an example command:
 
 ```shell
-CLUSTER=devnet CID=9ZTubJxjAPfPUAoC8Y9PeHNHbn3hkcq7DkiQpZT2cucV \
-bash -c "$(curl -sSfL https://mfactory-lab.github.io/svt-agent/install.sh)"
+wget -qO- https://mfactory-lab.github.io/svt-agent/install.sh | CLUSTER=mainnet CID=3Pb2CPq8pjUECdMDhsSnXBM59c7KWazrR8m7W9tCEECB bash
 ```
 
 # Configuration
