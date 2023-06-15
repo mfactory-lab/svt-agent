@@ -41,7 +41,7 @@ do_install() {
 
   if ! check_cmd "docker"; then
     echo "Installing docker..."
-    sh -c "$(curl -fsSL https://get.docker.com)"
+    wget -qO- https://get.docker.com | sh -c
     sudo systemctl start docker && sudo systemctl enable docker
     echo "Done"
   fi
