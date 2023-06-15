@@ -206,6 +206,7 @@ impl<'a> Notifier<'a> {
 
             if let Some(t) = self.task {
                 params.insert("task_id", t.id.to_string());
+                params.insert("task_version", t.version());
             }
 
             let data = json!(params);
