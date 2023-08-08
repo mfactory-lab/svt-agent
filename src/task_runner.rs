@@ -313,7 +313,7 @@ impl TaskRunner {
             ),
         ];
 
-        for file in TASK_EXTRA_VARS {
+        for &file in TASK_EXTRA_VARS {
             let file = file
                 .replace("{home}", TASK_WORKING_DIR)
                 .replace("{cluster}", &self.opts.cluster.to_string());
@@ -321,11 +321,11 @@ impl TaskRunner {
             cmd.push(format!("--extra-vars=@{}", file));
         }
 
-//         for file in TASK_EXTRA_VARS_CHECKED {
-//             if Path::new(file).exists() {
-//                 cmd.push(format!("--extra-vars=@{}", file));
-//             }
-//         }
+        for &file in TASK_EXTRA_VARS_CHECKED {
+            if Path::new(file).exists() {
+                cmd.push(format!("--extra-vars=@{}", file));
+            }
+        }
 
         if !task.args.is_empty() {
             cmd.push(format!("--extra-vars={}", json!(task.args)));
