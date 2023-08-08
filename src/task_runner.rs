@@ -321,11 +321,11 @@ impl TaskRunner {
             cmd.push(format!("--extra-vars=@{}", file));
         }
 
-        for file in TASK_EXTRA_VARS_CHECKED {
-            if Path::new(file).exists() {
-                cmd.push(format!("--extra-vars=@{}", file));
-            }
-        }
+//         for file in TASK_EXTRA_VARS_CHECKED {
+//             if Path::new(file).exists() {
+//                 cmd.push(format!("--extra-vars=@{}", file));
+//             }
+//         }
 
         if !task.args.is_empty() {
             cmd.push(format!("--extra-vars={}", json!(task.args)));
