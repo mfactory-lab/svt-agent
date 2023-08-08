@@ -18,7 +18,7 @@ pub const MIN_BALANCE_REQUIRED: u64 = 5000; // lamports
 /// @link: https://hub.docker.com/r/willhallonline/ansible
 // pub const ANSIBLE_IMAGE: &str = "willhallonline/ansible:2.13.7-alpine-3.15";
 pub const ANSIBLE_IMAGE: &str = "ghcr.io/mfactory-lab/sv-manager";
-pub const ANSIBLE_DEFAULT_TAG: &str = "agent-dev";
+pub const ANSIBLE_DEFAULT_TAG: &str = "agent-latest";
 
 pub const CONTAINER_NAME: &str = "svt-agent";
 
