@@ -255,9 +255,10 @@ impl Agent {
                                 .logs_subscribe(Duration::from_secs(LOGS_SUBSCRIBE_TIMEOUT))
                                 .await;
 
-                            info!("Listen new events...");
                             match logs_subscribe {
                                 Ok((mut stream, _unsubscribe)) => {
+                                    info!("Listen new events...");
+
                                     while let Some(log) = stream.next().await {
                                         // skip simulation
                                         if log.value.signature

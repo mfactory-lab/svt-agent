@@ -16,7 +16,6 @@ pub async fn pull_image(docker: &Docker, image: &str) -> Result<()> {
         match pull_result {
             Ok(output) => info!("{}", output),
             Err(e) => {
-                info!("Error: {:?}", e);
                 return Err(Error::from(e));
             }
         }
