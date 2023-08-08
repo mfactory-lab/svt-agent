@@ -8,14 +8,18 @@ edition = "2021"
 
 [dependencies]
 anyhow = "^1.0"
-anchor-client = "^0.27.0"
-anchor-lang = "^0.27.0"
+# anchor-client = "^0.28.0"
+# fix: https://github.com/coral-xyz/anchor/pull/2572
+anchor-client = { git = "https://github.com/coral-xyz/anchor.git", package = "anchor-client" }
+anchor-lang = "^0.28.0"
 clap = { version = "^4.3", features = ["derive", "env"] }
 chrono = { version = "^0.4", default-features = false }
 chacha20poly1305 = "0.9"
 curve25519-dalek = "^3.2"
 futures = "0.3"
 hyper = "0.14"
+solana-client = "^1.14.22"
+solana-sdk = "^1.14.22"
 tokio = "^1.22"
 tracing = "^0.1"
 tracing-subscriber = { version = "^0.3",  features = ["env-filter"] }
