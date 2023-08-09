@@ -17,6 +17,8 @@ use shiplift::{Container, ContainerOptions, Docker, LogsOptions, PullOptions};
 use sled::Db;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::env;
+use std::fs::{File, OpenOptions};
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 use tokio::sync::{Mutex, MutexGuard};
@@ -301,31 +303,51 @@ impl TaskRunner {
         format!("{}:{}", ANSIBLE_IMAGE, task.version())
     }
 
+    fn create_inventory_file(&self, path: impl AsRef<Path>) -> std::io::Result<()> {
+        let mut file = OpenOptions::new().create_new(true).write(true).open(path.as_ref())?;
+
+        file.write_all(
+            format!(
+                "[{}_validators]\nhost ansible_ssh_host={}",
+                &self.opts.cluster.to_string(),
+                env::var("DOCKER_HOST_IP").unwrap_or("localhost".to_string())
+            )
+            .as_bytes(),
+        )
+    }
+
     fn build_cmd(&self, task: &Task) -> Vec<String> {
+        let host_file = format!("/etc/sv_manager/{}_host", &self.opts.cluster.to_string());
+
+        match self.create_inventory_file(&host_file) {
+            Ok(_) => {
+                info!("New inventory file `{}` created!", &host_file);
+            }
+            Err(e) => {
+                warn!("Failed to create inventory file. {}", e);
+            }
+        }
+
         let mut cmd = vec![
             "ansible-playbook".to_string(),
             // "--limit=localhost",
-            // &format!("--inventory=./inventory/{}.yaml", self.opts.cluster),
             // "--tags=agent".to_string(),
-            format!(
-                "--inventory={},",
-                env::var("DOCKER_HOST_IP").unwrap_or("localhost".to_string())
-            ),
+            format!("--inventory={}", &host_file),
         ];
 
-        for &file in TASK_EXTRA_VARS {
-            let file = file
-                .replace("{home}", TASK_WORKING_DIR)
-                .replace("{cluster}", &self.opts.cluster.to_string());
-
-            cmd.push(format!("--extra-vars=@{}", file));
-        }
-
-        for &file in TASK_EXTRA_VARS_CHECKED {
-            if Path::new(file).exists() {
-                cmd.push(format!("--extra-vars=@{}", file));
-            }
-        }
+        // for &file in TASK_EXTRA_VARS {
+        //     let file = file
+        //         .replace("{home}", TASK_WORKING_DIR)
+        //         .replace("{cluster}", &self.opts.cluster.to_string());
+        //
+        //     cmd.push(format!("--extra-vars=@{}", file));
+        // }
+        //
+        // for &file in TASK_EXTRA_VARS_CHECKED {
+        //     if Path::new(file).exists() {
+        //         cmd.push(format!("--extra-vars=@{}", file));
+        //     }
+        // }
 
         if !task.args.is_empty() {
             cmd.push(format!("--extra-vars={}", json!(task.args)));
@@ -417,6 +439,12 @@ mod tests {
     use super::*;
     use std::env;
     use tracing_test::traced_test;
+
+    // #[test]
+    // fn can_create_inventory_file() {
+    //     let runner = get_task_runner();
+    //     runner.create_inventory_file("test.txt")
+    // }
 
     fn get_task_runner() -> TaskRunner {
         TaskRunner::new(TaskRunnerOpts::from(&AgentArgs {
