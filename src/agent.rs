@@ -477,16 +477,27 @@ async fn check_balance(client: &MessengerClient) -> Result<u64> {
 mod test {
     use super::*;
     use anchor_client::Cluster;
+    use solana_sdk::signature::{write_keypair_file, Keypair};
+    use std::env::temp_dir;
     use std::path::PathBuf;
+
+    fn tmp_file_path(name: &str) -> String {
+        use std::env;
+        let out_dir = temp_dir();
+        let keypair = Keypair::new();
+
+        format!("{}/{}-{}", out_dir.to_str().unwrap(), name, keypair.pubkey())
+    }
 
     #[tokio::test]
     async fn test_agent_init() {
-        let keypair = PathBuf::from("./keypair.json");
+        let outfile = tmp_file_path("test_keypair.json");
+        let serialized_keypair = write_keypair_file(&Keypair::new(), &outfile).unwrap();
 
         pub const CHANNEL_ID: &str = "Bk1EAvKminEwHjyVhG2QA7sQeU1W3zPnFE6rTnLWDKYJ";
 
         let agent = Agent::new(&AgentArgs {
-            keypair,
+            keypair: PathBuf::from(&outfile),
             cluster: Cluster::Devnet,
             channel_id: CHANNEL_ID.parse().unwrap(),
             program_id: MESSENGER_PROGRAM_ID.parse().unwrap(),
