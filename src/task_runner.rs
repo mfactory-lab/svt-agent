@@ -304,7 +304,11 @@ impl TaskRunner {
     }
 
     fn create_inventory_file(&self, path: impl AsRef<Path>) -> std::io::Result<()> {
-        let mut file = OpenOptions::new().create_new(true).write(true).open(path.as_ref())?;
+        let mut file = OpenOptions::new()
+            .create(true)
+            .truncate(true)
+            .write(true)
+            .open(path.as_ref())?;
 
         file.write_all(
             format!(
