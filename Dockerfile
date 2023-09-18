@@ -1,3 +1,5 @@
+# syntax=docker/dockerfile:1.4
+
 ARG RUST_VERSION=1.72.0
 ARG ALPINE_VERSION=3.18
 ARG CARGO_BUILD_FEATURES=default
