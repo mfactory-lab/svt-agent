@@ -1,11 +1,11 @@
 # syntax=docker/dockerfile:1.4
 
 ARG RUST_VERSION=1.72.0
-ARG ALPINE_VERSION=3.18
+#ARG ALPINE_VERSION=3.18
 ARG CARGO_BUILD_FEATURES=default
-ARG RUST_RELEASE_MODE=debug
-ARG UID=911
-ARG GID=911
+ARG RUST_RELEASE_MODE=release
+#ARG UID=911
+#ARG GID=911
 
 # AMD64 builder base
 FROM --platform=${BUILDPLATFORM} blackdex/rust-musl:x86_64-musl-stable-${RUST_VERSION}-openssl3 AS base-amd64
@@ -96,8 +96,10 @@ FROM build-${TARGETARCH} AS build
 
 ## Final image
 # FROM --platform=$BUILDPLATFORM scratch
-FROM --platform=$TARGETARCH gcr.io/distroless/cc
+#FROM --platform=$TARGETARCH gcr.io/distroless/cc
 #FROM --platform=${TARGETPLATFORM} gcr.io/distroless/static-debian${DEBIAN_VERSION}:nonroot
+
+FROM gcr.io/distroless/base-debian11:nonroot
 #FROM alpine:${ALPINE_VERSION}
 
 WORKDIR /app
