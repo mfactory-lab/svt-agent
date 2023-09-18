@@ -95,22 +95,26 @@ RUN set -ex; \
 FROM build-${TARGETARCH} AS build
 
 ## Final image
-FROM --platform=$BUILDPLATFORM scratch
-#FROM gcr.io/distroless/cc
+# FROM --platform=$BUILDPLATFORM scratch
+FROM --platform=$TARGETARCH gcr.io/distroless/cc
+#FROM --platform=${TARGETPLATFORM} gcr.io/distroless/static-debian${DEBIAN_VERSION}:nonroot
 #FROM alpine:${ALPINE_VERSION}
 
-ARG UID
-ARG GID
+WORKDIR /app
 
-RUN apk add --no-cache \
-    ca-certificates
+#ARG UID
+#ARG GID
 
-COPY --from=build --chmod=0755 /app/svt-agent /usr/local/bin
+#RUN apk add --no-cache \
+#    ca-certificates
 
-RUN addgroup -S -g ${GID} svt-agent && \
-    adduser -S -H -D -G svt-agent -u ${UID} -g "" -s /sbin/nologin svt-agent
+COPY --from=build /app/* /usr/local/bin/
+COPY ./ansible/ ./ansible
 
-USER svt-agent
+#RUN addgroup -S -g ${GID} svt-agent && \
+#    adduser -S -H -D -G svt-agent -u ${UID} -g "" -s /sbin/nologin svt-agent
+
+#USER svt-agent
 
 CMD ["svt-agent"]
 
