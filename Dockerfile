@@ -1,11 +1,8 @@
 # syntax=docker/dockerfile:1.4
 
 ARG RUST_VERSION=1.72.0
-#ARG ALPINE_VERSION=3.18
 ARG CARGO_BUILD_FEATURES=default
 ARG RUST_RELEASE_MODE=release
-#ARG UID=911
-#ARG GID=911
 
 # AMD64 builder base
 FROM --platform=${BUILDPLATFORM} blackdex/rust-musl:x86_64-musl-stable-${RUST_VERSION}-openssl3 AS base-amd64
@@ -48,21 +45,10 @@ WORKDIR /app
 COPY Cargo.* .
 COPY src ./src
 
-# Debug build
 RUN --mount=type=cache,target=/app/target set -ex; \
-    if [ "${RUST_RELEASE_MODE}" = "debug" ]; then \
-#        echo "pub const VERSION: &str = \"$(git describe --tag)\";" > src/version.rs; \
-        cargo build --target=x86_64-unknown-linux-musl --features "${CARGO_BUILD_FEATURES}"; \
-        mv target/x86_64-unknown-linux-musl/debug/svt-agent ./app; \
-    fi
-
-# Release build
-RUN set -ex; \
-    if [ "${RUST_RELEASE_MODE}" = "release" ]; then \
-#        echo "pub const VERSION: &str = \"$(git describe --tag)\";" > src/version.rs; \
-        cargo build --target=x86_64-unknown-linux-musl --features "${CARGO_BUILD_FEATURES}" --release; \
-        mv target/x86_64-unknown-linux-musl/release/svt-agent ./app; \
-    fi
+#    echo "pub const VERSION: &str = \"$(git describe --tag)\";" > src/version.rs; \
+    cargo build --target=x86_64-unknown-linux-musl --features "${CARGO_BUILD_FEATURES}" --release; \
+    mv target/x86_64-unknown-linux-musl/release/svt-agent .; \
 
 # ARM64 builder
 FROM base-arm64 AS build-arm64
@@ -75,21 +61,10 @@ WORKDIR /app
 COPY Cargo.* .
 COPY src ./src
 
-# Debug build
 RUN --mount=type=cache,target=/app/target set -ex; \
-    if [ "${RUST_RELEASE_MODE}" = "debug" ]; then \
-#        echo "pub const VERSION: &str = \"$(git describe --tag)\";" > src/version.rs; \
-        cargo build --target=aarch64-unknown-linux-musl --features "${CARGO_BUILD_FEATURES}"; \
-        mv target/aarch64-unknown-linux-musl/debug/svt-agent ./svt-agent; \
-    fi
-
-# Release build
-RUN set -ex; \
-    if [ "${RUST_RELEASE_MODE}" = "release" ]; then \
-#        echo "pub const VERSION: &str = \"$(git describe --tag)\";" > src/version.rs; \
-        cargo build --target=aarch64-unknown-linux-musl --features "${CARGO_BUILD_FEATURES}" --release; \
-        mv target/aarch64-unknown-linux-musl/release/svt-agent ./svt-agent; \
-    fi
+#    echo "pub const VERSION: &str = \"$(git describe --tag)\";" > src/version.rs; \
+    cargo build --target=aarch64-unknown-linux-musl --features "${CARGO_BUILD_FEATURES}" --release; \
+    mv target/aarch64-unknown-linux-musl/release/svt-agent .;
 
 # Get target binary
 FROM build-${TARGETARCH} AS build
@@ -98,26 +73,15 @@ FROM build-${TARGETARCH} AS build
 # FROM --platform=$BUILDPLATFORM scratch
 #FROM --platform=$TARGETARCH gcr.io/distroless/cc
 #FROM --platform=${TARGETPLATFORM} gcr.io/distroless/static-debian${DEBIAN_VERSION}:nonroot
+#FROM gcr.io/distroless/static-debian11:nonroot
 
-FROM gcr.io/distroless/base-debian11:nonroot
-#FROM alpine:${ALPINE_VERSION}
+FROM cgr.dev/chainguard/static:latest
 
 WORKDIR /app
 
-#ARG UID
-#ARG GID
-
-#RUN apk add --no-cache \
-#    ca-certificates
-
-COPY --from=build /app/svt-agent /usr/local/bin/
+COPY --from=build --chown=nonroot:nonroot /app/svt-agent /app
 COPY ./ansible/ ./ansible
 
-#RUN addgroup -S -g ${GID} svt-agent && \
-#    adduser -S -H -D -G svt-agent -u ${UID} -g "" -s /sbin/nologin svt-agent
-
-#USER svt-agent
-
-CMD ["svt-agent"]
+ENTRYPOINT ["/app/svt-agent"]
 
 STOPSIGNAL SIGTERM
