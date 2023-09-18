@@ -110,7 +110,7 @@ WORKDIR /app
 #RUN apk add --no-cache \
 #    ca-certificates
 
-COPY --from=build /app/* /usr/local/bin/
+COPY --from=build /app/svt-agent /usr/local/bin/
 COPY ./ansible/ ./ansible
 
 #RUN addgroup -S -g ${GID} svt-agent && \
