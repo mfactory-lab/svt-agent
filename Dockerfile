@@ -45,9 +45,8 @@ ARG RUST_RELEASE_MODE
 
 WORKDIR /app
 
-#COPY Cargo.* .
-#COPY src ./src
-COPY . ./
+COPY Cargo.* .
+COPY src ./src
 
 # Debug build
 RUN --mount=type=cache,target=/app/target set -ex; \
@@ -96,7 +95,9 @@ RUN set -ex; \
 FROM build-${TARGETARCH} AS build
 
 ## Final image
-FROM alpine:${ALPINE_VERSION}
+FROM --platform=$BUILDPLATFORM scratch
+#FROM gcr.io/distroless/cc
+#FROM alpine:${ALPINE_VERSION}
 
 ARG UID
 ARG GID
@@ -104,9 +105,7 @@ ARG GID
 RUN apk add --no-cache \
     ca-certificates
 
-COPY --from=build --chmod=0755 /app/app /usr/local/bin
-
-RUN ls -la /usr/local/bin
+COPY --from=build --chmod=0755 /app/svt-agent /usr/local/bin
 
 RUN addgroup -S -g ${GID} svt-agent && \
     adduser -S -H -D -G svt-agent -u ${UID} -g "" -s /sbin/nologin svt-agent
