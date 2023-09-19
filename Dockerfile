@@ -46,9 +46,8 @@ COPY Cargo.* .
 COPY src ./src
 
 RUN --mount=type=cache,target=/app/target set -ex; \
-#    echo "pub const VERSION: &str = \"$(git describe --tag)\";" > src/version.rs; \
     cargo build --target=x86_64-unknown-linux-musl --features "${CARGO_BUILD_FEATURES}" --release; \
-    mv target/x86_64-unknown-linux-musl/release/svt-agent .; \
+    mv target/x86_64-unknown-linux-musl/release/svt-agent .
 
 # ARM64 builder
 FROM base-arm64 AS build-arm64
@@ -62,15 +61,13 @@ COPY Cargo.* .
 COPY src ./src
 
 RUN --mount=type=cache,target=/app/target set -ex; \
-#    echo "pub const VERSION: &str = \"$(git describe --tag)\";" > src/version.rs; \
     cargo build --target=aarch64-unknown-linux-musl --features "${CARGO_BUILD_FEATURES}" --release; \
-    mv target/aarch64-unknown-linux-musl/release/svt-agent .;
+    mv target/aarch64-unknown-linux-musl/release/svt-agent .
 
 # Get target binary
 FROM build-${TARGETARCH} AS build
 
 ## Final image
-# FROM --platform=$BUILDPLATFORM scratch
 #FROM --platform=$TARGETARCH gcr.io/distroless/cc
 #FROM --platform=${TARGETPLATFORM} gcr.io/distroless/static-debian${DEBIAN_VERSION}:nonroot
 #FROM gcr.io/distroless/static-debian11:nonroot
