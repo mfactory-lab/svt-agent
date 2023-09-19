@@ -18,7 +18,7 @@ services:
 #        CARGO_BUILD_FEATURES: default
 
     volumes:
-#      - /var/run/docker.sock:/var/run/docker.sock
+      - /var/run/docker.sock:/var/run/docker.sock
       - ./keypair.json:/app/keypair.json
     command: run
     restart: always
