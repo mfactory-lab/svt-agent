@@ -19,6 +19,7 @@ CONTAINER_NAME="${CONTAINER_NAME:-svt-agent}"
 SSHKEY_PATH="$HOME/.ssh/svt-agent"
 WORKING_DIR="$HOME/svt-agent"
 KEYPAIR_PATH="$WORKING_DIR/keypair.json"
+LOG_LEVEL=info
 
 # ARE YOU ROOT (or sudo)?
 if [[ $EUID -ne 0 ]]; then
@@ -86,6 +87,7 @@ do_install() {
     -e DOCKER_HOST_IP="$IP_ADDR" \
     -e AGENT_CLUSTER="$CLUSTER" \
     -e AGENT_CHANNEL_ID="$CID" \
+    -e RUST_LOG="$LOG_LEVEL" \
     $IMAGE_NAME:$AGENT_RELEASE \
     run)"
 
