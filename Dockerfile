@@ -69,8 +69,11 @@ FROM cgr.dev/chainguard/static:latest
 
 WORKDIR /app
 
-COPY --from=build --chown=nonroot:nonroot /app/svt-agent /app
 COPY ./ansible/ ./ansible
+COPY --from=build /app/svt-agent /app
+# The "nonroot" user does not have the necessary permissions to connect to the Docker socket.
+#COPY --from=build --chown=nonroot:nonroot /app/svt-agent /app
+USER root
 
 ENTRYPOINT ["/app/svt-agent"]
 
