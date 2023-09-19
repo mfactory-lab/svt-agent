@@ -73,7 +73,7 @@ do_install() {
   IP_ADDR=$(hostname -I | cut -f1 -d' ')
 
   say "Starting docker container..."
-  CONTAINER_ID="$(docker run -d -it --restart=always --name $CONTAINER_NAME \
+  CONTAINER_ID="$(docker run -d -it --privileged --restart=always --name $CONTAINER_NAME \
     --hostname $CONTAINER_NAME \
     --log-opt max-size=10m \
     --log-opt max-file=5 \
@@ -97,10 +97,12 @@ do_install() {
   say "SVT-Agent successfully installed!"
   say "Please add some balance to the agent address."
   say ""
+  say "Host IP: $IP_ADDR"
   say "Cluster: $CLUSTER"
+  say "Channel: $CID"
   say "Agent Address: $PUBKEY"
   say "Agent Release: $AGENT_RELEASE"
-  say "Host IP: $IP_ADDR"
+  say "Agent Home: $WORKING_DIR"
   say ""
   say "Done"
 }
