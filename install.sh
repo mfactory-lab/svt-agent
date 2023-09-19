@@ -16,6 +16,7 @@ IMAGE_NAME=ghcr.io/mfactory-lab/svt-agent
 AGENT_RELEASE="${AGENT_RELEASE:-latest}"
 CLUSTER="${CLUSTER:-devnet}"
 CONTAINER_NAME="${CONTAINER_NAME:-svt-agent}"
+LOG_LEVEL="${LOG_LEVEL:-info}"
 SSHKEY_PATH="$HOME/.ssh/svt-agent"
 WORKING_DIR="$HOME/svt-agent"
 KEYPAIR_PATH="$WORKING_DIR/keypair.json"
@@ -86,21 +87,24 @@ do_install() {
     -e DOCKER_HOST_IP="$IP_ADDR" \
     -e AGENT_CLUSTER="$CLUSTER" \
     -e AGENT_CHANNEL_ID="$CID" \
+    -e RUST_LOG="$LOG_LEVEL" \
     $IMAGE_NAME:$AGENT_RELEASE \
     run)"
 
   say "Container ID: $CONTAINER_ID"
 
-  PUBKEY="$(docker run --rm -it -v $KEYPAIR_PATH:/app/keypair.json $IMAGE_NAME:$AGENT_RELEASE show-pubkey)"
+  PUBKEY="$(docker run --rm -i -v $KEYPAIR_PATH:/app/keypair.json $IMAGE_NAME:$AGENT_RELEASE show-pubkey)"
 
   say ""
   say "SVT-Agent successfully installed!"
   say "Please add some balance to the agent address."
   say ""
+  say "Host IP: $IP_ADDR"
   say "Cluster: $CLUSTER"
+  say "Channel: $CID"
   say "Agent Address: $PUBKEY"
   say "Agent Release: $AGENT_RELEASE"
-  say "Host IP: $IP_ADDR"
+  say "Agent Home: $WORKING_DIR"
   say ""
   say "Done"
 }

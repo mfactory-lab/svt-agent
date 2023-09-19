@@ -1,0 +1,30 @@
+version: "3.7"
+
+services:
+
+  agent:
+    image: ghcr.io/mfactory-lab/svt-agent:nightly
+
+#    platform: linux/arm64
+#    platform: linux/x86_64
+    # use "build" to build your local lemmy server image for development. make sure to comment out "image".
+    # run: docker compose up --build
+
+#    build:
+#      context: ./
+#      dockerfile: Dockerfile
+#      args:
+#        RUST_RELEASE_MODE: release
+#        CARGO_BUILD_FEATURES: default
+
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./keypair.json:/app/keypair.json
+    command: run
+    restart: always
+    environment:
+      - RUST_LOG=info
+#      - RUST_BACKTRACE=full
+#      - DOCKER_HOST_IP=127.0.0.1
+      - AGENT_CLUSTER=mainnet
+      - AGENT_CHANNEL_ID=3Pb2CPq8pjUECdMDhsSnXBM59c7KWazrR8m7W9tCEECB
