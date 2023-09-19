@@ -43,7 +43,8 @@ WORKDIR /app
 COPY Cargo.* .
 COPY src ./src
 
-RUN --mount=type=cache,target=/app/target set -ex; \
+RUN --mount=type=cache,target=${CARGO_HOME}/registry,id=${TARGETPLATFORM} \
+    --mount=type=cache,target=/app/target,id=${TARGETPLATFORM} \
     cargo build --target=x86_64-unknown-linux-musl --features "${CARGO_BUILD_FEATURES}" --release; \
     mv target/x86_64-unknown-linux-musl/release/svt-agent .
 
@@ -57,15 +58,16 @@ WORKDIR /app
 COPY Cargo.* .
 COPY src ./src
 
-RUN --mount=type=cache,target=/app/target set -ex; \
+RUN --mount=type=cache,target=${CARGO_HOME}/registry,id=${TARGETPLATFORM} \
+    --mount=type=cache,target=/app/target,id=${TARGETPLATFORM} \
     cargo build --target=aarch64-unknown-linux-musl --features "${CARGO_BUILD_FEATURES}" --release; \
     mv target/aarch64-unknown-linux-musl/release/svt-agent .
 
 # Get target binary
 FROM build-${TARGETARCH} AS build
 
-## Final image
-FROM cgr.dev/chainguard/static:latest
+# Final image
+FROM cgr.dev/chainguard/static
 
 WORKDIR /app
 
@@ -76,5 +78,3 @@ COPY --from=build /app/svt-agent /app
 USER root
 
 ENTRYPOINT ["/app/svt-agent"]
-
-STOPSIGNAL SIGTERM
