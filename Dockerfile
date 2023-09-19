@@ -2,7 +2,6 @@
 
 ARG RUST_VERSION=1.72.0
 ARG CARGO_BUILD_FEATURES=default
-ARG RUST_RELEASE_MODE=release
 
 # AMD64 builder base
 FROM --platform=${BUILDPLATFORM} blackdex/rust-musl:x86_64-musl-stable-${RUST_VERSION}-openssl3 AS base-amd64
@@ -38,7 +37,6 @@ RUN mkdir -pv "${CARGO_HOME}" && \
 FROM base-amd64 AS build-amd64
 
 ARG CARGO_BUILD_FEATURES
-ARG RUST_RELEASE_MODE
 
 WORKDIR /app
 
@@ -53,7 +51,6 @@ RUN --mount=type=cache,target=/app/target set -ex; \
 FROM base-arm64 AS build-arm64
 
 ARG CARGO_BUILD_FEATURES
-ARG RUST_RELEASE_MODE
 
 WORKDIR /app
 
@@ -68,10 +65,6 @@ RUN --mount=type=cache,target=/app/target set -ex; \
 FROM build-${TARGETARCH} AS build
 
 ## Final image
-#FROM --platform=$TARGETARCH gcr.io/distroless/cc
-#FROM --platform=${TARGETPLATFORM} gcr.io/distroless/static-debian${DEBIAN_VERSION}:nonroot
-#FROM gcr.io/distroless/static-debian11:nonroot
-
 FROM cgr.dev/chainguard/static:latest
 
 WORKDIR /app
