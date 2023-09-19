@@ -16,10 +16,10 @@ IMAGE_NAME=ghcr.io/mfactory-lab/svt-agent
 AGENT_RELEASE="${AGENT_RELEASE:-latest}"
 CLUSTER="${CLUSTER:-devnet}"
 CONTAINER_NAME="${CONTAINER_NAME:-svt-agent}"
+LOG_LEVEL="${LOG_LEVEL:-info}"
 SSHKEY_PATH="$HOME/.ssh/svt-agent"
 WORKING_DIR="$HOME/svt-agent"
 KEYPAIR_PATH="$WORKING_DIR/keypair.json"
-LOG_LEVEL=info
 
 # ARE YOU ROOT (or sudo)?
 if [[ $EUID -ne 0 ]]; then
