@@ -498,19 +498,11 @@ mod tests {
         let cmd = runner.build_cmd(&task);
 
         assert_eq!(cmd[0], "ansible-playbook");
-        assert_eq!(cmd[1], "--inventory=localhost,");
         assert_eq!(
-            cmd[2 + TASK_EXTRA_VARS.len()],
-            format!("./playbooks/{}.yaml", task.name)
+            cmd[1],
+            format!("--inventory=/etc/sv_manager/{}_host", runner.opts.cluster)
         );
-
-        env::set_var("DOCKER_HOST_IP", "1.2.3.4");
-        task.args = HashMap::from([("a".to_string(), "1".to_string())]);
-
-        let cmd = runner.build_cmd(&task);
-
-        assert_eq!(cmd[1], "--inventory=1.2.3.4,");
-        assert_eq!(cmd[2 + TASK_EXTRA_VARS.len()], "--extra-vars={\"a\":\"1\"}");
+        assert_eq!(cmd[2], format!("./playbooks/{}.yaml", task.name));
     }
 
     #[tokio::test]
